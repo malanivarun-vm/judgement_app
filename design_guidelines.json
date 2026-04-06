@@ -1,0 +1,111 @@
+{
+  "theme": "dark",
+  "archetype": "5 (Jewel & Luxury) - Casino Green Felt Variant",
+  "colors": {
+    "background": {
+      "base": "#0A1C13",
+      "gradient": "radial-gradient(circle at center, #1A4B33 0%, #0A1C13 100%)",
+      "surface": "rgba(0, 0, 0, 0.4)",
+      "surfaceGlass": "rgba(255, 255, 255, 0.05)"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "accent": "#F3E5AB",
+      "gold": "#D4AF37",
+      "danger": "#EF4444",
+      "success": "#10B981"
+    },
+    "border": {
+      "glass": "rgba(255, 255, 255, 0.1)",
+      "accent": "rgba(243, 229, 171, 0.3)"
+    },
+    "game": {
+      "suit_red": "#E63946",
+      "suit_black": "#1A1A1A",
+      "card_bg": "#FAFAFA"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "headings": "'Outfit', sans-serif",
+      "body": "'DM Sans', sans-serif",
+      "monospace": "'JetBrains Mono', monospace"
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight",
+      "h3": "text-xl sm:text-2xl",
+      "body": "text-base",
+      "small": "text-sm",
+      "tiny_label": "text-xs uppercase tracking-[0.2em]"
+    }
+  },
+  "components": {
+    "global": [
+      {
+        "name": "GlassSurface",
+        "description": "Premium glassmorphism for overlays, scoreboards, and lobby configs.",
+        "classes": "bg-black/40 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.4)] rounded-2xl"
+      },
+      {
+        "name": "PlayingCard",
+        "description": "Minimalist, sleek card design built with CSS. Pure white base, slight inner shadow.",
+        "classes": "bg-[#FAFAFA] rounded-xl shadow-xl border border-white/20 aspect-[2.5/3.5] flex flex-col justify-between p-2 sm:p-3 text-xl sm:text-3xl font-bold transition-transform duration-300 hover:-translate-y-4 hover:rotate-1"
+      },
+      {
+        "name": "PrimaryCTA",
+        "description": "Gold/Champagne button for major actions like 'Start Game' or 'Place Bid'.",
+        "classes": "bg-gradient-to-b from-[#F3E5AB] to-[#D4AF37] text-black font-bold py-3 px-8 rounded-full shadow-[0_0_15px_rgba(212,175,55,0.4)] hover:shadow-[0_0_25px_rgba(212,175,55,0.6)] transition-all"
+      }
+    ],
+    "shadcn_overrides": {
+      "Button": "Make primary buttons Gold. Use pill-shape (rounded-full) for game actions to feel more like casino chips.",
+      "Dialog": "Use GlassSurface classes. Remove default white background. Use text-white.",
+      "Card": "Use GlassSurface. Do not use default white borders."
+    }
+  },
+  "layout_strategies": {
+    "App Shell": "Generous spacing. Hide native scrollbars. Screen-filling radial green gradient.",
+    "Bidding Modal": "Centered overlay over the game table. Neumorphic buttons for numeric bids to feel tactile.",
+    "Game Table": "Radial/Spatial layout. Player hand fixed to bottom center. Opponents positioned around the top and sides. Active trick cards overlap slightly in the direct center.",
+    "Lobby": "Control Room grid structure. Split into 'Players Connected' list, and 'Game Configuration' panel.",
+    "Scoreboard": "Dense table view but with generous row padding (`py-4`) and monospace fonts for numbers so they align perfectly."
+  },
+  "motion_and_interactions": {
+    "Card Hover": "Lift up `-translate-y-4` and slight rotation to feel physical.",
+    "Card Play": "Smoothly animate (`framer-motion` layoutId) from the player's hand to the center table.",
+    "Trick Win": "Winning cards scale down and slide toward the winning player's avatar.",
+    "Modals": "Fade in with a slight scale up (`scale-95` to `scale-100`), backed by an extra `backdrop-blur-md` on the root."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.unsplash.com/photo-1601370690183-1c7796ecec61?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwyfHxncmVlbiUyMGZlbHQlMjB0ZXh0dXJlfGVufDB8fHx8MTc3NTQ2NDM5OXww&ixlib=rb-4.1.0&q=85",
+      "category": "background",
+      "description": "Green textile. Can be used as an absolute positioned overlay with `opacity-10` and `mix-blend-overlay` or `mix-blend-multiply` over the radial gradient to create physical felt realism."
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1619689350720-bd3dff470ec5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzOTB8MHwxfHNlYXJjaHwyfHxwbGF5aW5nJTIwY2FyZHMlMjBjYXNpbm8lMjBkYXJrfGVufDB8fHx8MTc3NTQ2NDM5OXww&ixlib=rb-4.1.0&q=85",
+      "category": "hero",
+      "description": "Dark atmospheric casino chips/cards. Perfect for a landing page hero visual. Must use a heavy black gradient overlay (e.g. `bg-black/60`) so text is readable."
+    }
+  ],
+  "icons": {
+    "library": "lucide-react",
+    "instructions": "Use lucide-react (installed by default). For playing card suits, rely on standard unicode symbols (♠, ♥, ♦, ♣) scaled up and styled with absolute precision."
+  },
+  "accessibility_and_testing": {
+    "data_testid": "MANDATORY. All interactive elements (cards, buttons, modal triggers, player avatars) must have descriptive data-testid (e.g., 'play-card-ace-spades', 'bid-button-3').",
+    "contrast": "Ensure gold text on dark green passes APCA contrast. Use pure white for critical game text.",
+    "prefers_reduced_motion": "Ensure framer-motion respects `prefers-reduced-motion: reduce` for slide and scale effects."
+  },
+  "instructions_to_main_agent": [
+    "Do NOT use `Inter` for headings. Ensure `Outfit` and `DM Sans` are loaded.",
+    "Apply `min-h-screen bg-[radial-gradient(circle_at_center,_#1A4B33_0%,_#0A1C13_100%)]` on the main game area root. DO NOT USE PLAIN FLAT COLORS for the background. It must feel like a premium lit table.",
+    "For the cards, build a custom component with pure HTML/Tailwind. Do not rely on external images for playing cards. Create an `aspect-[2.5/3.5]` white div with rounded corners (`rounded-xl`), an inner border (`border-white/20`), and text matching the suit color. Ensure it visually separates from the dark green table.",
+    "Opponent Avatars should be minimalist rings displaying their bid vs won tricks (e.g., 'Won 2 / Bid 3') positioned around the central table.",
+    "The bidding modal should freeze the background (use `backdrop-blur-sm bg-black/50`) so focus is entirely on selecting the exact number.",
+    "Always apply generous spacing (`p-6` or `p-8`) inside any GlassSurface components.",
+    "Build out the actual WebSockets or mock logic cleanly, but ensure the UI reacts instantaneously. If mocked, highlight this clearly in the logs or a tiny overlay text."
+  ]
+}
