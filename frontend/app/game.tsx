@@ -16,7 +16,7 @@ import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
 import ScoreBoard from '../components/ScoreBoard';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 interface GameState {
   type: string;
