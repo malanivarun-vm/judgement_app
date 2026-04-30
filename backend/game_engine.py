@@ -28,7 +28,7 @@ def get_trump_suit(round_number: int) -> str:
 
 
 def get_max_cards(num_players: int) -> int:
-    return 52 // num_players
+    return min(52 // num_players, 10)
 
 
 def is_valid_play(card: Dict, hand: List[Dict], lead_suit: Optional[str]) -> bool:
