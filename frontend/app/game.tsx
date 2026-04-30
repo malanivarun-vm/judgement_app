@@ -9,6 +9,8 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
@@ -16,7 +18,9 @@ import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
 import ScoreBoard from '../components/ScoreBoard';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
+
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 interface GameState {
   type: string;
@@ -479,10 +483,9 @@ export default function GameScreen() {
 
         {/* Player Hand */}
         <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
           style={styles.handScroll}
           contentContainerStyle={styles.handContent}
+          showsVerticalScrollIndicator={false}
         >
           {gameState.your_hand.map((card, idx) => {
             const canPlay = playableIndices.has(idx);
@@ -531,6 +534,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+    paddingTop: STATUSBAR_HEIGHT,
   },
   center: {
     flex: 1,
@@ -902,14 +906,16 @@ const styles = StyleSheet.create({
 
   // Hand
   handScroll: {
-    maxHeight: 90,
+    maxHeight: 170,
     minHeight: 90,
   },
   handContent: {
     paddingHorizontal: 12,
     paddingVertical: 4,
-    alignItems: 'center',
-    gap: 2,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 4,
   },
 
   // Error Banner
