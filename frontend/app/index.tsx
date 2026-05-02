@@ -312,7 +312,8 @@ const styles = StyleSheet.create({
   },
   howToPlayLink: {
     marginTop: 20,
-    paddingVertical: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
   howToPlayText: {
     color: COLORS.textSecondary,
