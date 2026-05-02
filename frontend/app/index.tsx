@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
+import HowToPlayModal from '../components/HowToPlayModal';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
@@ -28,6 +29,7 @@ export default function HomeScreen() {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [howToPlayVisible, setHowToPlayVisible] = useState(false);
 
   const createRoom = async () => {
     if (!playerName.trim()) {
@@ -174,14 +176,21 @@ export default function HomeScreen() {
           <Text style={styles.outlineButtonText}>Join Room</Text>
         </TouchableOpacity>
 
-        {/* Rules hint */}
-        <View style={styles.rulesBox}>
-          <Text style={styles.rulesTitle}>How to Play</Text>
-          <Text style={styles.rulesText}>
-            Bid exactly how many tricks you'll win each round. Score points for accuracy — lose points for missing!
+        <TouchableOpacity
+          style={styles.howToPlayLink}
+          onPress={() => setHowToPlayVisible(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.howToPlayText}>
+            New to Judgement?{' '}
+            <Text style={styles.howToPlayAction}>How to Play →</Text>
           </Text>
-          <Text style={styles.rulesText}>3-7 players • Share room code to invite</Text>
-        </View>
+        </TouchableOpacity>
+
+        <HowToPlayModal
+          visible={howToPlayVisible}
+          onClose={() => setHowToPlayVisible(false)}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -301,29 +310,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
   },
-  rulesBox: {
-    marginTop: 28,
-    backgroundColor: COLORS.surfaceGlass,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    padding: 16,
-    width: '100%',
-    alignItems: 'center',
+  howToPlayLink: {
+    marginTop: 20,
+    paddingVertical: 8,
   },
-  rulesTitle: {
-    color: COLORS.goldLight,
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  rulesText: {
+  howToPlayText: {
     color: COLORS.textSecondary,
     fontSize: 13,
     textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 4,
+  },
+  howToPlayAction: {
+    color: COLORS.goldLight,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
