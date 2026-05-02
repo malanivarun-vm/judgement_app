@@ -11,6 +11,13 @@ import {
 } from 'react-native';
 import { COLORS } from '../utils/theme';
 
+const SCORE_ROWS = [
+  { label: 'Exact bid',            value: '+bid × 10 pts', positive: true },
+  { label: 'Miss bid',             value: '−bid × 10 pts', positive: false },
+  { label: 'Zero bid, 0 tricks',   value: '+25 pts',       positive: true },
+  { label: 'Zero bid, any tricks', value: '−25 pts',       positive: false },
+];
+
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -43,7 +50,7 @@ export default function HowToPlayModal({ visible, onClose }: Props) {
             {'Bid exactly how many tricks you\'ll win each round. Hit your bid and you score — miss it and you lose points. 3–7 players.'}
           </Section>
 
-          <Section label="🃏 Playing Tricks">
+          <Section label="🎴 Playing Tricks">
             {'Lead any card. Others '}
             <Text style={styles.bold}>must follow suit</Text>
             {' if they can. If not, play any card. Highest trump wins; otherwise highest card of the lead suit wins.'}
@@ -96,13 +103,6 @@ export default function HowToPlayModal({ visible, onClose }: Props) {
     </Modal>
   );
 }
-
-const SCORE_ROWS = [
-  { label: 'Exact bid',            value: '+bid × 10 pts', positive: true },
-  { label: 'Miss bid',             value: '−bid × 10 pts', positive: false },
-  { label: 'Zero bid, 0 tricks',   value: '+25 pts',       positive: true },
-  { label: 'Zero bid, any tricks', value: '−25 pts',       positive: false },
-];
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
