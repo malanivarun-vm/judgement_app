@@ -8,11 +8,15 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
-  Dimensions,
+  Animated,
+  Easing,
+  AccessibilityInfo,
   Platform,
   StatusBar,
+  useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
 import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
@@ -26,7 +30,7 @@ interface GameState {
   type: string;
   room_id: string;
   phase: string;
-  players: Array<{
+  players: {
     id: string;
     name: string;
     is_host: boolean;
@@ -36,17 +40,17 @@ interface GameState {
     card_count: number;
     is_connected: boolean;
     has_bid: boolean;
-  }>;
+  }[];
   your_id: string;
   your_index: number;
-  your_hand: Array<{ suit: string; rank: string }>;
+  your_hand: { suit: string; rank: string }[];
   current_round: number;
   total_rounds: number;
   cards_this_round: number;
   trump_suit: string;
   dealer_index: number;
   current_player_index: number;
-  current_trick: Array<{ player_index: number; card: { suit: string; rank: string } }>;
+  current_trick: { player_index: number; card: { suit: string; rank: string } }[];
   lead_suit: string | null;
   tricks_played: number;
   round_history: any[];
@@ -69,8 +73,64 @@ export default function GameScreen() {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
   const [trickResult, setTrickResult] = useState<any>(null);
+  const [reduceMotion, setReduceMotion] = useState(false);
   const trickResultTimer = useRef<any>(null);
   const prevTrickRef = useRef<string>('');
+  const ambientPulse = useRef(new Animated.Value(0)).current;
+  const turnPulse = useRef(new Animated.Value(0)).current;
+  const trickPop = useRef(new Animated.Value(0)).current;
+  const reduceMotionRef = useRef(false);
+  const { width: SCREEN_W } = useWindowDimensions();
+
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then(setReduceMotion)
+      .catch(() => setReduceMotion(false));
+  }, []);
+
+  useEffect(() => {
+    reduceMotionRef.current = reduceMotion;
+  }, [reduceMotion]);
+
+  useEffect(() => {
+    if (reduceMotion) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(ambientPulse, {
+          toValue: 1,
+          duration: 7000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(ambientPulse, {
+          toValue: 0,
+          duration: 7000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [ambientPulse, reduceMotion]);
+
+  const fireHaptic = useCallback(async (kind: 'selection' | 'light' | 'medium' | 'success' | 'error') => {
+    try {
+      if (kind === 'selection') {
+        await Haptics.selectionAsync();
+      } else if (kind === 'light') {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } else if (kind === 'medium') {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } else if (kind === 'success') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
+    } catch {
+      // ignore unsupported platforms
+    }
+  }, []);
 
   const connect = useCallback(() => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) return;
@@ -85,6 +145,7 @@ export default function GameScreen() {
     socket.onopen = () => {
       setConnected(true);
       setError('');
+      void fireHaptic('selection');
     };
 
     socket.onclose = () => {
@@ -107,19 +168,30 @@ export default function GameScreen() {
             if (prevTrickRef.current !== key) {
               prevTrickRef.current = key;
               setTrickResult(data.last_completed_trick);
+              if (!reduceMotionRef.current) {
+                trickPop.setValue(0);
+                Animated.timing(trickPop, {
+                  toValue: 1,
+                  duration: 260,
+                  easing: Easing.out(Easing.cubic),
+                  useNativeDriver: true,
+                }).start();
+              }
+              void fireHaptic('success');
               if (trickResultTimer.current) clearTimeout(trickResultTimer.current);
               trickResultTimer.current = setTimeout(() => setTrickResult(null), 2500);
             }
           }
         } else if (data.type === 'error') {
           setError(data.message);
+          void fireHaptic('error');
           setTimeout(() => setError(''), 4000);
         }
-      } catch (e) {
+      } catch {
         // ignore parse errors
       }
     };
-  }, [params.room_id, params.player_name, params.player_id, params.is_host]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop]);
 
   useEffect(() => {
     connect();
@@ -149,6 +221,54 @@ export default function GameScreen() {
       },
     ]);
   };
+
+  const getOpponentSeatStyle = (index: number, count: number) => {
+    const stageWidth = Math.max(280, SCREEN_W - 32);
+    const seatWidth = Math.min(128, Math.max(96, Math.floor(stageWidth / Math.max(3, count + 1))));
+    const seatHeight = 76;
+    const centerX = stageWidth / 2;
+    const centerY = 104;
+    const radiusX = Math.max(64, stageWidth * 0.34);
+    const radiusY = 52;
+    const thetaStart = Math.PI * 1.12;
+    const thetaEnd = Math.PI * 1.88;
+    const theta = count === 1
+      ? Math.PI * 1.5
+      : thetaStart + ((thetaEnd - thetaStart) * index) / Math.max(1, count - 1);
+
+    return {
+      left: centerX + Math.cos(theta) * radiusX - seatWidth / 2,
+      top: centerY + Math.sin(theta) * radiusY - seatHeight / 2,
+      width: seatWidth,
+      height: seatHeight,
+    };
+  };
+
+  const sendAction = async (action: any, haptic: 'selection' | 'light' | 'medium' | 'success' = 'selection') => {
+    await fireHaptic(haptic);
+    send(action);
+  };
+
+  useEffect(() => {
+    if (!gameState || reduceMotion) return;
+    const shouldPulse = gameState.current_player_index === gameState.your_index;
+    if (shouldPulse) {
+      turnPulse.setValue(0.2);
+      Animated.spring(turnPulse, {
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 7,
+        tension: 110,
+      }).start();
+    } else {
+      Animated.timing(turnPulse, {
+        toValue: 0.2,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [gameState, reduceMotion, turnPulse]);
 
   // Loading state
   if (!gameState) {
@@ -229,7 +349,7 @@ export default function GameScreen() {
             <TouchableOpacity
               testID="start-game-btn"
               style={styles.goldButton}
-              onPress={() => send({ action: 'start_game' })}
+              onPress={() => void sendAction({ action: 'start_game' }, 'medium')}
               activeOpacity={0.8}
             >
               <Text style={styles.goldButtonText}>Start Game</Text>
@@ -281,7 +401,7 @@ export default function GameScreen() {
               <TouchableOpacity
                 testID="new-game-btn"
                 style={styles.goldButton}
-                onPress={() => send({ action: 'new_game' })}
+                onPress={() => void sendAction({ action: 'new_game' }, 'medium')}
                 activeOpacity={0.8}
               >
                 <Text style={styles.goldButtonText}>Play Again</Text>
@@ -321,7 +441,7 @@ export default function GameScreen() {
             <TouchableOpacity
               testID="next-round-btn"
               style={[styles.goldButton, { marginTop: 20 }]}
-              onPress={() => send({ action: 'next_round' })}
+              onPress={() => void sendAction({ action: 'next_round' }, 'medium')}
               activeOpacity={0.8}
             >
               <Text style={styles.goldButtonText}>Next Round</Text>
@@ -343,6 +463,7 @@ export default function GameScreen() {
   const trumpColor = SUIT_DISPLAY_COLORS[gameState.trump_suit] || '#FFF';
   const trumpSymbol = SUIT_SYMBOLS[gameState.trump_suit] || '';
   const showBiddingModal = phase === 'bidding' && isMyTurn;
+  const seatCount = opponents.length;
 
   // Determine trick cards to display
   const displayTrickCards = trickResult
@@ -352,183 +473,263 @@ export default function GameScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.gameWrap}>
-        {/* Top Info Bar */}
-        <View style={styles.infoBar}>
-          <TouchableOpacity testID="leave-game-btn" onPress={handleLeave} style={styles.leaveBtn}>
-            <Text style={styles.leaveBtnText}>✕</Text>
-          </TouchableOpacity>
-          <View style={styles.infoItem}>
-            <Text style={[styles.infoValue, { color: trumpColor }]}>{trumpSymbol}</Text>
-            <Text style={styles.infoLabel}>Trump</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoValue}>
-              {gameState.current_round}/{gameState.total_rounds}
-            </Text>
-            <Text style={styles.infoLabel}>Round</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoValue}>{gameState.cards_this_round}</Text>
-            <Text style={styles.infoLabel}>Cards</Text>
-          </View>
-          <View style={styles.infoItem}>
-            <Text style={styles.infoValue}>
-              {gameState.tricks_played}/{gameState.cards_this_round}
-            </Text>
-            <Text style={styles.infoLabel}>Tricks</Text>
-          </View>
+        <View style={styles.tableBackdrop}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.ambientGlow,
+              styles.ambientGlowLeft,
+              {
+                opacity: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [0.2, 0.42] }),
+                transform: [
+                  {
+                    scale: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1.06] }),
+                  },
+                ],
+              },
+            ]}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.ambientGlow,
+              styles.ambientGlowRight,
+              {
+                opacity: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [0.16, 0.34] }),
+                transform: [
+                  {
+                    scale: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [1.06, 0.96] }),
+                  },
+                ],
+              },
+            ]}
+          />
         </View>
 
-        {/* Opponents Row */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.opponentsScroll}
-          contentContainerStyle={styles.opponentsContent}
-        >
-          {opponents.map((opp) => {
-            const oppIdx = players.findIndex((p) => p.id === opp.id);
-            const isOppTurn = gameState.current_player_index === oppIdx;
-            const isDealer = gameState.dealer_index === oppIdx;
-            return (
-              <View
-                key={opp.id}
-                testID={`opponent-${opp.id}`}
-                style={[styles.oppCard, isOppTurn && styles.oppCardActive]}
-              >
-                <View style={styles.oppTop}>
-                  <Text style={styles.oppName} numberOfLines={1}>
-                    {opp.name}
-                  </Text>
-                  {isDealer && <Text style={styles.dealerBadge}>D</Text>}
-                </View>
-                {opp.has_bid || opp.bid !== null ? (
-                  <Text style={styles.oppBid}>
-                    Bid: {opp.bid} | Won: {opp.tricks_won}
-                  </Text>
-                ) : (
-                  <Text style={styles.oppBid}>
-                    {phase === 'bidding' ? '...' : `Cards: ${opp.card_count}`}
-                  </Text>
-                )}
-                <Text style={styles.oppScore}>{opp.total_score} pts</Text>
-                {!opp.is_connected && (
-                  <Text style={styles.disconnected}>Offline</Text>
-                )}
-              </View>
-            );
-          })}
-        </ScrollView>
+        <View style={styles.tableShell}>
+          <View style={styles.statusRail}>
+            <TouchableOpacity testID="leave-game-btn" onPress={handleLeave} style={styles.leaveButton}>
+              <Text style={styles.leaveBtnText}>← Leave</Text>
+            </TouchableOpacity>
 
-        {/* Trick Area */}
-        <View style={styles.trickArea}>
-          {trickResult && (
-            <Text style={styles.trickWinnerText}>
-              {trickResult.winner_name} won the trick!
-            </Text>
-          )}
-          {displayTrickCards && displayTrickCards.length > 0 ? (
-            <View style={styles.trickCards}>
-              {displayTrickCards.map((tc: any, i: number) => {
-                const isWinner =
-                  trickResult && tc.player_index === trickResult.winner_index;
-                return (
-                  <View key={i} style={styles.trickCardWrap}>
-                    <View style={isWinner ? styles.winnerHighlight : undefined}>
-                      <PlayingCard card={tc.card} size="trick" />
+            <View style={styles.statusCluster}>
+              <StatusPill label="Trump" value={trumpSymbol || '—'} valueStyle={{ color: trumpColor }} />
+              <StatusPill label="Round" value={`${gameState.current_round}/${gameState.total_rounds}`} />
+              <StatusPill label="Cards" value={`${gameState.cards_this_round}`} />
+              <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
+              <StatusPill label={connected ? 'Live' : 'Offline'} value={connected ? 'Connected' : 'Retrying'} muted={!connected} />
+            </View>
+          </View>
+
+          <View style={styles.opponentStage}>
+            {opponents.map((opp, index) => {
+              const oppIdx = players.findIndex((p) => p.id === opp.id);
+              const isOppTurn = gameState.current_player_index === oppIdx;
+              const isDealer = gameState.dealer_index === oppIdx;
+              return (
+                <View
+                  key={opp.id}
+                  testID={`opponent-${opp.id}`}
+                  style={[
+                    styles.opponentSeat,
+                    getOpponentSeatStyle(index, seatCount),
+                    isOppTurn && styles.opponentSeatActive,
+                  ]}
+                >
+                  <View style={styles.opponentSeatTop}>
+                    <View style={[styles.seatAvatar, isOppTurn && styles.seatAvatarActive]}>
+                      <Text style={styles.seatAvatarText}>{opp.name[0]?.toUpperCase()}</Text>
                     </View>
-                    <Text style={styles.trickCardName}>
-                      {players[tc.player_index]?.name || '?'}
-                    </Text>
+                    <View style={styles.opponentSeatMeta}>
+                      <View style={styles.seatNameRow}>
+                        <Text style={styles.opponentName} numberOfLines={1}>
+                          {opp.name}
+                        </Text>
+                        {isDealer && <Text style={styles.dealerBadge}>D</Text>}
+                      </View>
+                      <Text style={styles.opponentScore}>{opp.total_score} pts</Text>
+                    </View>
                   </View>
+                  <Text style={styles.opponentBody}>
+                    {opp.has_bid || opp.bid !== null
+                      ? `Bid ${opp.bid}  Won ${opp.tricks_won}`
+                      : phase === 'bidding'
+                        ? 'Waiting to bid'
+                        : `Cards ${opp.card_count}`}
+                  </Text>
+                  {!opp.is_connected && (
+                    <Text style={styles.disconnected}>Offline</Text>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.centerStage}>
+            <Animated.View
+              style={[
+                styles.turnBanner,
+                {
+                  opacity: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.7, 1] }),
+                  transform: [
+                    {
+                      scale: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.98, 1.02] }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Text style={[styles.turnText, isMyTurn && styles.turnTextActive]}>
+                {phase === 'bidding'
+                  ? isMyTurn
+                    ? 'Your turn to bid'
+                    : `Waiting for ${currentPlayerName} to bid`
+                  : isMyTurn
+                    ? 'Your turn to play'
+                    : `Waiting for ${currentPlayerName}`}
+              </Text>
+            </Animated.View>
+
+            <View style={styles.trickTable}>
+              <View style={styles.tableHeaderRow}>
+                <Text style={styles.tableHeaderLabel}>
+                  {phase === 'bidding' ? 'Bidding round' : 'Playing trick'}
+                </Text>
+                <Text style={styles.tableHeaderBadge}>
+                  {gameState.current_player_index === your_index ? 'Your move' : 'Table live'}
+                </Text>
+              </View>
+
+              {trickResult && (
+                <Animated.View
+                  style={[
+                    styles.trickResultCard,
+                    {
+                      opacity: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.1, 1] }),
+                      transform: [
+                        {
+                          scale: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the trick</Text>
+                </Animated.View>
+              )}
+
+              {displayTrickCards && displayTrickCards.length > 0 ? (
+                <View style={styles.trickCards}>
+                  {displayTrickCards.map((tc: any, i: number) => {
+                    const isWinner =
+                      trickResult && tc.player_index === trickResult.winner_index;
+                    return (
+                      <View key={i} style={styles.trickCardWrap}>
+                        <View style={isWinner ? styles.winnerHighlight : undefined}>
+                          <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
+                        </View>
+                        <Text style={styles.trickCardName}>
+                          {players[tc.player_index]?.name || '?'}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : (
+                <View style={styles.emptyTrick}>
+                  <Text style={styles.emptyTrickLabel}>
+                    {phase === 'bidding' ? 'Bids are being locked in' : 'Play a card to open the trick'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.selfDock}>
+            <View style={styles.selfMeta}>
+              <View>
+                <Text style={styles.selfName}>{myInfo?.name || params.player_name}</Text>
+                <Text style={styles.selfSubtext}>
+                  {gameState.dealer_index === your_index ? 'Dealer' : 'Player'}
+                  {myInfo?.bid !== null && myInfo?.bid !== undefined
+                    ? ` • Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
+                    : ' • No bid yet'}
+                </Text>
+              </View>
+              <Text style={styles.selfScore}>{myInfo?.total_score || 0} pts</Text>
+            </View>
+          </View>
+
+          <View style={styles.handDock}>
+            <Text style={styles.handLabel}>Your hand</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.handContent}
+            >
+              {gameState.your_hand.map((card, idx) => {
+                const canPlay = playableIndices.has(idx);
+                return (
+                  <PlayingCard
+                    key={`${card.rank}-${card.suit}-${idx}`}
+                    card={card}
+                    size="hand"
+                    highlighted={phase === 'playing' && isMyTurn && canPlay}
+                    dimmed={phase === 'playing' && isMyTurn && !canPlay}
+                    onPress={
+                      phase === 'playing' && isMyTurn && canPlay
+                        ? () => void sendAction({ action: 'play_card', card }, 'medium')
+                        : undefined
+                    }
+                    disabled={!(phase === 'playing' && isMyTurn && canPlay)}
+                  />
                 );
               })}
-            </View>
-          ) : (
-            <View style={styles.emptyTrick}>
-              <Text style={styles.emptyTrickText}>
-                {phase === 'bidding' ? 'Bidding in progress...' : 'Play a card'}
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Turn Indicator */}
-        <View style={styles.turnBar}>
-          {phase === 'bidding' ? (
-            <Text style={[styles.turnText, isMyTurn && styles.turnTextActive]}>
-              {isMyTurn ? "Your turn to bid!" : `Waiting for ${currentPlayerName} to bid...`}
-            </Text>
-          ) : (
-            <Text style={[styles.turnText, isMyTurn && styles.turnTextActive]}>
-              {isMyTurn ? "Your turn! Play a card" : `Waiting for ${currentPlayerName}...`}
-            </Text>
-          )}
-        </View>
-
-        {/* Player Info */}
-        <View style={styles.myInfoBar}>
-          <Text style={styles.myName}>{myInfo?.name || params.player_name}</Text>
-          {myInfo?.bid !== null && myInfo?.bid !== undefined && (
-            <View style={styles.myStatRow}>
-              <Text style={styles.myStat}>Bid: {myInfo.bid}</Text>
-              <Text style={styles.myStat}>Won: {myInfo.tricks_won}</Text>
-            </View>
-          )}
-          <Text style={styles.myScore}>{myInfo?.total_score || 0} pts</Text>
-          {gameState.dealer_index === your_index && (
-            <Text style={styles.dealerTag}>Dealer</Text>
-          )}
-        </View>
-
-        {/* Player Hand */}
-        <ScrollView
-          style={styles.handScroll}
-          contentContainerStyle={styles.handContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {gameState.your_hand.map((card, idx) => {
-            const canPlay = playableIndices.has(idx);
-            return (
-              <PlayingCard
-                key={`${card.rank}-${card.suit}-${idx}`}
-                card={card}
-                size="hand"
-                dimmed={phase === 'playing' && isMyTurn && !canPlay}
-                onPress={
-                  phase === 'playing' && isMyTurn && canPlay
-                    ? () => send({ action: 'play_card', card })
-                    : undefined
-                }
-                disabled={!(phase === 'playing' && isMyTurn && canPlay)}
-              />
-            );
-          })}
-        </ScrollView>
-
-        {/* Error Banner */}
-        {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{error}</Text>
+            </ScrollView>
           </View>
-        ) : null}
 
-        {/* Bidding Modal */}
-        <BiddingModal
-          visible={showBiddingModal}
-          cardsThisRound={gameState.cards_this_round}
-          trumpSuit={gameState.trump_suit}
-          currentRound={gameState.current_round}
-          totalRounds={gameState.total_rounds}
-          restrictedBids={gameState.restricted_bids || []}
-          onPlaceBid={(bid) => send({ action: 'place_bid', bid })}
-        />
+          {error ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>{error}</Text>
+            </View>
+          ) : null}
+
+          <BiddingModal
+            visible={showBiddingModal}
+            yourHand={gameState.your_hand}
+            cardsThisRound={gameState.cards_this_round}
+            trumpSuit={gameState.trump_suit}
+            currentRound={gameState.current_round}
+            totalRounds={gameState.total_rounds}
+            restrictedBids={gameState.restricted_bids || []}
+            onPlaceBid={(bid) => void sendAction({ action: 'place_bid', bid }, 'medium')}
+          />
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
-const { width: SCREEN_W } = Dimensions.get('window');
+function StatusPill({
+  label,
+  value,
+  muted,
+  valueStyle,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  valueStyle?: object;
+}) {
+  return (
+    <View style={[styles.statusPill, muted && styles.statusPillMuted]}>
+      <Text style={styles.statusPillLabel}>{label}</Text>
+      <Text style={[styles.statusPillValue, valueStyle]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -709,6 +910,205 @@ const styles = StyleSheet.create({
   gameWrap: {
     flex: 1,
   },
+  tableBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  ambientGlow: {
+    position: 'absolute',
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: 'rgba(243,229,171,0.12)',
+  },
+  ambientGlowLeft: {
+    top: -40,
+    left: -90,
+  },
+  ambientGlowRight: {
+    bottom: 90,
+    right: -100,
+    backgroundColor: 'rgba(26,75,51,0.48)',
+  },
+  tableShell: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 10,
+  },
+  statusRail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  leaveButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  statusCluster: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  statusPill: {
+    minWidth: 84,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+  },
+  statusPillMuted: {
+    opacity: 0.72,
+  },
+  statusPillLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 3,
+  },
+  statusPillValue: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  opponentStage: {
+    position: 'relative',
+    height: 180,
+    marginBottom: 6,
+  },
+  opponentSeat: {
+    position: 'absolute',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: 'rgba(8, 24, 17, 0.78)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  opponentSeatActive: {
+    borderColor: COLORS.goldLight,
+    backgroundColor: 'rgba(243,229,171,0.08)',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.28,
+  },
+  opponentSeatTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 3,
+  },
+  seatAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.backgroundLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  seatAvatarActive: {
+    backgroundColor: COLORS.gold,
+  },
+  seatAvatarText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  opponentSeatMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  seatNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  opponentName: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '800',
+    flex: 1,
+  },
+  opponentScore: {
+    color: COLORS.goldLight,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  opponentBody: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  centerStage: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  turnBanner: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    marginBottom: 10,
+  },
+  trickTable: {
+    width: '100%',
+    maxWidth: 420,
+    minHeight: 210,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+    backgroundColor: 'rgba(7, 21, 15, 0.72)',
+    padding: 14,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  tableHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tableHeaderLabel: {
+    color: COLORS.goldLight,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  tableHeaderBadge: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  trickResultCard: {
+    alignSelf: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(212,175,55,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.28)',
+    marginBottom: 10,
+  },
   infoBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -820,6 +1220,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
+    flexWrap: 'wrap',
   },
   trickCardWrap: {
     alignItems: 'center',
@@ -837,102 +1238,103 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   emptyTrick: {
-    width: 140,
-    height: 80,
-    borderRadius: 12,
+    minHeight: 90,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.borderGlass,
     borderStyle: 'dashed',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 18,
   },
-  emptyTrickText: {
+  emptyTrickLabel: {
     color: COLORS.textSecondary,
     fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
   },
 
-  // Turn Indicator
-  turnBar: {
-    paddingVertical: 6,
-    alignItems: 'center',
-  },
   turnText: {
     color: COLORS.textSecondary,
     fontSize: 13,
     fontWeight: '500',
+    textAlign: 'center',
   },
   turnTextActive: {
     color: COLORS.gold,
     fontWeight: '700',
   },
 
-  // My Info
-  myInfoBar: {
+  selfDock: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  selfMeta: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 16,
   },
-  myName: {
+  selfName: {
     color: COLORS.text,
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '900',
   },
-  myStatRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  myStat: {
+  selfSubtext: {
     color: COLORS.textSecondary,
     fontSize: 12,
+    marginTop: 3,
     fontWeight: '600',
   },
-  myScore: {
+  selfScore: {
     color: COLORS.goldLight,
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '900',
   },
-  dealerTag: {
-    color: COLORS.gold,
-    fontSize: 10,
+  handDock: {
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+  },
+  handLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
     fontWeight: '800',
-    backgroundColor: 'rgba(212,175,55,0.2)',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: 8,
     paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-
-  // Hand
-  handScroll: {
-    maxHeight: 170,
-    minHeight: 90,
   },
   handContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     justifyContent: 'center',
-    gap: 4,
+    gap: 6,
   },
 
   // Error Banner
   errorBanner: {
     position: 'absolute',
-    top: 60,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(239,68,68,0.9)',
-    borderRadius: 10,
-    padding: 10,
+    top: 70,
+    left: 18,
+    right: 18,
+    backgroundColor: 'rgba(239,68,68,0.92)',
+    borderRadius: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   errorBannerText: {
     color: '#FFF',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 
   // === ROUND END ===
