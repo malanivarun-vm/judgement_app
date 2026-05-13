@@ -117,48 +117,45 @@ export default function BiddingModal({
             <MetaChip label={`${trumpSymbol} ${trumpSuit}`} color={trumpColor} />
           </View>
 
-          <View style={styles.selectedPanel}>
-            <Text style={styles.selectedLabel}>Selected bid</Text>
-            <Text style={styles.selectedValue}>{selectedBid}</Text>
-            <Text style={styles.selectedHint}>
-              {isRestricted(selectedBid)
-                ? 'This bid is restricted. Pick another.'
-                : restrictedBids.length > 0
-                  ? `Dealer rule blocks: ${restrictedBids.join(', ')}`
-                  : 'Tap a number to lock it in.'}
-            </Text>
-          </View>
-
-          <View style={styles.bidGrid}>
-            {bidOptions.map((bid) => {
-              const restricted = isRestricted(bid);
-              const selected = selectedBid === bid && !restricted;
-              return (
-                <TouchableOpacity
-                  key={bid}
-                  testID={`bid-button-${bid}`}
-                  style={[
-                    styles.bidButton,
-                    selected && styles.bidButtonSelected,
-                    restricted && styles.bidButtonRestricted,
-                  ]}
-                  onPress={() => void handleSelect(bid)}
-                  disabled={restricted}
-                  activeOpacity={0.85}
-                >
-                  <Text
+          <View style={styles.bidScrollWrapper}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.bidScrollContent}
+            >
+              {bidOptions.map((bid) => {
+                const restricted = isRestricted(bid);
+                const selected = selectedBid === bid && !restricted;
+                return (
+                  <TouchableOpacity
+                    key={bid}
+                    testID={`bid-button-${bid}`}
                     style={[
-                      styles.bidButtonText,
-                      selected && styles.bidButtonTextSelected,
-                      restricted && styles.bidButtonTextRestricted,
+                      styles.bidChip,
+                      selected && styles.bidChipSelected,
+                      restricted && styles.bidChipRestricted,
                     ]}
+                    onPress={() => void handleSelect(bid)}
+                    disabled={restricted}
+                    activeOpacity={0.85}
                   >
-                    {bid}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+                    <Text
+                      style={[
+                        styles.bidChipText,
+                        selected && styles.bidChipTextSelected,
+                        restricted && styles.bidChipTextRestricted,
+                      ]}
+                    >
+                      {restricted ? `${bid}✕` : String(bid)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
+          {cardsThisRound > 8 && (
+            <Text style={styles.swipeHint}>swipe for more →</Text>
+          )}
 
           <TouchableOpacity
             testID="confirm-bid-button"
@@ -247,55 +244,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  selectedPanel: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 18,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    marginBottom: 14,
-  },
-  selectedLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
+  bidScrollWrapper: {
     marginBottom: 4,
   },
-  selectedValue: {
-    color: COLORS.goldLight,
-    fontSize: 42,
-    fontWeight: '900',
-    lineHeight: 48,
+  bidScrollContent: {
+    gap: 6,
+    paddingRight: 8,
   },
-  selectedHint: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 6,
-    minHeight: 16,
-  },
-  bidGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
-    marginBottom: 16,
-  },
-  bidButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 18,
+  bidChip: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
     borderColor: COLORS.borderGlass,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bidButtonSelected: {
+  bidChipSelected: {
     backgroundColor: COLORS.gold,
     borderColor: COLORS.gold,
     shadowColor: COLORS.gold,
@@ -303,20 +269,28 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  bidButtonRestricted: {
+  bidChipRestricted: {
     backgroundColor: 'rgba(239,68,68,0.14)',
     borderColor: 'rgba(239,68,68,0.3)',
   },
-  bidButtonText: {
+  bidChipText: {
     color: COLORS.text,
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '800',
   },
-  bidButtonTextSelected: {
+  bidChipTextSelected: {
     color: '#000',
   },
-  bidButtonTextRestricted: {
+  bidChipTextRestricted: {
     color: 'rgba(239,68,68,0.65)',
+    fontSize: 12,
+  },
+  swipeHint: {
+    color: COLORS.gold,
+    fontSize: 12,
+    textAlign: 'right',
+    marginBottom: 12,
+    opacity: 0.75,
   },
   confirmButton: {
     backgroundColor: COLORS.gold,
