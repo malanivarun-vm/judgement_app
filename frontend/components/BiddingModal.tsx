@@ -86,6 +86,23 @@ export default function BiddingModal({
       <View style={styles.overlay}>
         <View style={styles.backdrop} />
         <View style={styles.modal}>
+          {/* Read-only hand reference */}
+          <View style={styles.cardSection}>
+            <Text style={styles.cardSectionLabel}>
+              {yourHand.length > 9 ? `Your hand — ${yourHand.length} cards` : 'Your hand'}
+            </Text>
+            <View style={yourHand.length > 9 ? styles.cardWrap : styles.cardRow}>
+              {yourHand.map((card, idx) => (
+                <PlayingCard
+                  key={`${card.rank}-${card.suit}-${idx}`}
+                  card={card}
+                  size={yourHand.length > 9 ? 'small' : 'trick'}
+                  disabled
+                />
+              ))}
+            </View>
+          </View>
+          <View style={styles.cardDivider} />
           <View style={styles.header}>
             <Text style={styles.kicker}>Bidding Round</Text>
             <Text style={styles.title}>Choose your exact number</Text>
@@ -317,5 +334,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     letterSpacing: 0.6,
+  },
+  cardSection: {
+    marginBottom: 10,
+  },
+  cardSectionLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  cardRow: {
+    flexDirection: 'row',
+    gap: 5,
+  },
+  cardWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 3,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: COLORS.borderGlass,
+    marginBottom: 14,
   },
 });
