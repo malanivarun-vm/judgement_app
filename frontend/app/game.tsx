@@ -20,6 +20,7 @@ import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
 import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
+import HandDisplay from '../components/HandDisplay';
 import ScoreBoard from '../components/ScoreBoard';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
@@ -661,31 +662,12 @@ export default function GameScreen() {
           </View>
 
           <View style={styles.handDock}>
-            <Text style={styles.handLabel}>Your hand</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.handContent}
-            >
-              {gameState.your_hand.map((card, idx) => {
-                const canPlay = playableIndices.has(idx);
-                return (
-                  <PlayingCard
-                    key={`${card.rank}-${card.suit}-${idx}`}
-                    card={card}
-                    size="hand"
-                    highlighted={phase === 'playing' && isMyTurn && canPlay}
-                    dimmed={phase === 'playing' && isMyTurn && !canPlay}
-                    onPress={
-                      phase === 'playing' && isMyTurn && canPlay
-                        ? () => void sendAction({ action: 'play_card', card }, 'medium')
-                        : undefined
-                    }
-                    disabled={!(phase === 'playing' && isMyTurn && canPlay)}
-                  />
-                );
-              })}
-            </ScrollView>
+            <HandDisplay
+              hand={gameState.your_hand}
+              playableIndices={phase === 'playing' && isMyTurn ? playableIndices : null}
+              onPlayCard={(card) => void sendAction({ action: 'play_card', card }, 'medium')}
+              phase={phase}
+            />
           </View>
 
           {error ? (

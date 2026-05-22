@@ -1,16 +1,13 @@
+// Redesigned bidding modal with giant number picker + hand grid preview.
+// Drop-in replacement — same required props as previous BiddingModal.
+
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Modal,
-  Platform,
-  AccessibilityInfo,
-  ScrollView,
+  View, Text, TouchableOpacity, StyleSheet,
+  Modal, Platform, AccessibilityInfo, ScrollView,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
+import { COLORS, SUIT_SYMBOLS, CardStyle } from '../utils/theme';
 import PlayingCard, { CardData } from './PlayingCard';
 
 interface BiddingModalProps {
@@ -22,57 +19,60 @@ interface BiddingModalProps {
   totalRounds: number;
   restrictedBids: number[];
   onPlaceBid: (bid: number) => void;
+  cardStyle?: CardStyle;
 }
 
 export default function BiddingModal({
-  visible,
-  yourHand,
-  cardsThisRound,
-  trumpSuit,
-  currentRound,
-  totalRounds,
-  restrictedBids,
-  onPlaceBid,
+  visible, yourHand, cardsThisRound, trumpSuit,
+  currentRound, totalRounds, restrictedBids, onPlaceBid,
+  cardStyle = 'minimal',
 }: BiddingModalProps) {
-  const bidOptions = useMemo(
-    () => Array.from({ length: cardsThisRound + 1 }, (_, i) => i),
-    [cardsThisRound]
-  );
-  const [selectedBid, setSelectedBid] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [selectedBid, setSelectedBid]   = useState(0);
+
+  const bidOptions   = useMemo(() => Array.from({ length: cardsThisRound + 1 }, (_, i) => i), [cardsThisRound]);
+  const isRestricted = (b: number) => restrictedBids.includes(b);
+
+  const trumpSymbol = SUIT_SYMBOLS[trumpSuit] || '';
+  const trumpColor  = trumpSuit === 'hearts' || trumpSuit === 'diamonds' ? COLORS.suitRed : '#FFFFFF';
+
+  const cardSize = yourHand.length > 8 ? 'small' : 'bid';
 
   useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then(setReduceMotion)
-      .catch(() => setReduceMotion(false));
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!visible) return;
-    const firstAllowed = bidOptions.find((bid) => !restrictedBids.includes(bid));
-    setSelectedBid(firstAllowed ?? 0);
-  }, [visible, bidOptions, restrictedBids]);
+    const first = bidOptions.find(b => !isRestricted(b)) ?? 0;
+    setSelectedBid(first);
+  }, [visible, bidOptions]);
 
-  const isRestricted = (bid: number) => restrictedBids.includes(bid);
-  const trumpSymbol = SUIT_SYMBOLS[trumpSuit] || '';
-  const trumpColor = trumpSuit === 'hearts' || trumpSuit === 'diamonds' ? COLORS.suitRed : '#FFFFFF';
-
-  const handleSelect = async (bid: number) => {
-    if (isRestricted(bid)) return;
-    setSelectedBid(bid);
+  const haptic = async (kind: 'selection' | 'medium') => {
     try {
-      await Haptics.selectionAsync();
-    } catch {
-      // ignore haptic failures on unsupported platforms
+      kind === 'selection'
+        ? await Haptics.selectionAsync()
+        : await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch { /* ignore */ }
+  };
+
+  const change = async (delta: number) => {
+    let next = selectedBid + delta;
+    while (next >= 0 && next <= cardsThisRound && isRestricted(next)) next += delta;
+    if (next >= 0 && next <= cardsThisRound && !isRestricted(next)) {
+      setSelectedBid(next);
+      await haptic('selection');
     }
   };
 
+  const handleDot = async (b: number) => {
+    if (isRestricted(b)) return;
+    setSelectedBid(b);
+    await haptic('selection');
+  };
+
   const handleConfirm = async () => {
-    try {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch {
-      // ignore haptic failures on unsupported platforms
-    }
+    await haptic('medium');
     onPlaceBid(selectedBid);
   };
 
@@ -85,86 +85,93 @@ export default function BiddingModal({
     >
       <View style={styles.overlay}>
         <View style={styles.backdrop} />
-        <View style={styles.modal}>
-          {/* Read-only hand reference */}
-          <View style={styles.cardSection}>
-            <Text style={styles.cardSectionLabel}>
-              {yourHand.length > 9 ? `Your hand — ${yourHand.length} cards` : 'Your hand'}
-            </Text>
-            <View style={yourHand.length > 9 ? styles.cardWrap : styles.cardRow}>
-              {yourHand.map((card, idx) => (
-                <PlayingCard
-                  key={`${card.rank}-${card.suit}-${idx}`}
-                  card={card}
-                  size={yourHand.length > 9 ? 'small' : 'trick'}
-                  disabled
-                />
-              ))}
-            </View>
-          </View>
-          <View style={styles.cardDivider} />
-          <View style={styles.header}>
-            <Text style={styles.kicker}>Bidding Round</Text>
-            <Text style={styles.title}>Choose your exact number</Text>
-            <Text style={styles.subtitle}>
-              Hit the bid exactly to score. Miss it and the round pushes back.
-            </Text>
-          </View>
+        <View style={styles.sheet}>
 
-          <View style={styles.metaRow}>
+          {/* ── Hand preview ─────────────────────────────── */}
+          <Text style={styles.sectionLabel}>
+            Your hand · {yourHand.length} cards
+          </Text>
+          <ScrollView
+            style={styles.handScroll}
+            contentContainerStyle={styles.handGrid}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+          >
+            {yourHand.map((c, i) => (
+              <PlayingCard
+                key={`${c.rank}-${c.suit}-${i}`}
+                card={c} size={cardSize} cardStyle={cardStyle} disabled
+              />
+            ))}
+          </ScrollView>
+
+          <View style={styles.divider} />
+
+          {/* ── Context chips ────────────────────────────── */}
+          <Text style={styles.kicker}>Bidding Round</Text>
+          <Text style={styles.title}>How many tricks will you win?</Text>
+          <View style={styles.chips}>
             <MetaChip label={`Round ${currentRound}/${totalRounds}`} />
             <MetaChip label={`${cardsThisRound} cards`} />
             <MetaChip label={`${trumpSymbol} ${trumpSuit}`} color={trumpColor} />
           </View>
 
-          <View style={styles.bidScrollWrapper}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.bidScrollContent}
+          {/* ── Giant number picker ──────────────────────── */}
+          <View style={styles.pickerRow}>
+            <TouchableOpacity
+              testID="bid-decrease"
+              style={styles.arrowBtn}
+              onPress={() => change(-1)}
+              activeOpacity={0.7}
             >
-              {bidOptions.map((bid) => {
-                const restricted = isRestricted(bid);
-                const selected = selectedBid === bid && !restricted;
-                return (
-                  <TouchableOpacity
-                    key={bid}
-                    testID={`bid-button-${bid}`}
-                    style={[
-                      styles.bidChip,
-                      selected && styles.bidChipSelected,
-                      restricted && styles.bidChipRestricted,
-                    ]}
-                    onPress={() => void handleSelect(bid)}
-                    disabled={restricted}
-                    activeOpacity={0.85}
-                  >
-                    <Text
-                      style={[
-                        styles.bidChipText,
-                        selected && styles.bidChipTextSelected,
-                        restricted && styles.bidChipTextRestricted,
-                      ]}
-                    >
-                      {restricted ? `${bid}✕` : String(bid)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-          {cardsThisRound > 8 && (
-            <Text style={styles.swipeHint}>swipe for more →</Text>
-          )}
+              <Text style={styles.arrowText}>−</Text>
+            </TouchableOpacity>
 
+            <View style={styles.numberWrap}>
+              <Text style={styles.bigNumber}>{selectedBid}</Text>
+              <Text style={styles.outOf}>out of {cardsThisRound}</Text>
+            </View>
+
+            <TouchableOpacity
+              testID="bid-increase"
+              style={styles.arrowBtn}
+              onPress={() => change(1)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.arrowText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Dot indicators ───────────────────────────── */}
+          <View style={styles.dotsRow}>
+            {bidOptions.map(b => (
+              <TouchableOpacity
+                key={b}
+                testID={`bid-dot-${b}`}
+                onPress={() => handleDot(b)}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              >
+                <View style={[
+                  styles.dot,
+                  { width: b === selectedBid ? 22 : 8 },
+                  b === selectedBid ? styles.dotActive
+                    : isRestricted(b) ? styles.dotRestricted
+                    : styles.dotInactive,
+                ]} />
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* ── Confirm ──────────────────────────────────── */}
           <TouchableOpacity
             testID="confirm-bid-button"
-            style={styles.confirmButton}
-            onPress={() => void handleConfirm()}
-            activeOpacity={0.9}
+            style={styles.confirmBtn}
+            onPress={handleConfirm}
+            activeOpacity={0.88}
           >
-            <Text style={styles.confirmText}>Lock in {selectedBid}</Text>
+            <Text style={styles.confirmTxt}>Lock in {selectedBid} →</Text>
           </TouchableOpacity>
+
         </View>
       </View>
     </Modal>
@@ -173,165 +180,106 @@ export default function BiddingModal({
 
 function MetaChip({ label, color }: { label: string; color?: string }) {
   return (
-    <View style={styles.metaChip}>
-      <Text style={[styles.metaChipText, color ? { color } : undefined]}>{label}</Text>
+    <View style={styles.chip}>
+      <Text style={[styles.chipText, color ? { color } : undefined]}>{label}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(3,10,7,0.78)',
+    backgroundColor: 'rgba(2,8,5,0.90)',
   },
-  modal: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: COLORS.surfaceSolid,
-    borderRadius: 24,
+  sheet: {
+    width: '100%', maxWidth: 380,
+    backgroundColor: '#0C2218',
+    borderRadius: 26,
     borderWidth: 1,
-    borderColor: COLORS.borderAccent,
-    padding: 20,
+    borderColor: 'rgba(212,175,55,0.28)',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 26,
     shadowColor: '#000',
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 14,
+    shadowOpacity: 0.6,
+    shadowRadius: 32,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 18,
   },
-  header: {
-    marginBottom: 16,
+
+  // Hand section
+  sectionLabel: {
+    color: COLORS.textSecondary, fontSize: 10, fontWeight: '800',
+    letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 8,
   },
+  handScroll: { maxHeight: 136 },
+  handGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    gap: 5, justifyContent: 'center', paddingTop: 4, paddingBottom: 8,
+  },
+
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginVertical: 16 },
+
+  // Header
   kicker: {
-    color: COLORS.gold,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 2.2,
-    textTransform: 'uppercase',
-    marginBottom: 6,
+    color: COLORS.gold, fontSize: 10, fontWeight: '800',
+    letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4,
   },
   title: {
-    color: COLORS.goldLight,
-    fontSize: 22,
-    fontWeight: '900',
-    marginBottom: 6,
-  },
-  subtitle: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
-  },
-  metaChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-  },
-  metaChipText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  bidScrollWrapper: {
-    marginBottom: 4,
-  },
-  bidScrollContent: {
-    gap: 6,
-    paddingRight: 8,
-  },
-  bidChip: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bidChipSelected: {
-    backgroundColor: COLORS.gold,
-    borderColor: COLORS.gold,
-    shadowColor: COLORS.gold,
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  bidChipRestricted: {
-    backgroundColor: 'rgba(239,68,68,0.14)',
-    borderColor: 'rgba(239,68,68,0.3)',
-  },
-  bidChipText: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  bidChipTextSelected: {
-    color: '#000',
-  },
-  bidChipTextRestricted: {
-    color: 'rgba(239,68,68,0.65)',
-    fontSize: 12,
-  },
-  swipeHint: {
-    color: COLORS.gold,
-    fontSize: 12,
-    textAlign: 'right',
+    color: COLORS.goldLight, fontSize: 19, fontWeight: '900',
     marginBottom: 12,
-    opacity: 0.75,
   },
-  confirmButton: {
+
+  // Chips
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  chip: {
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+  },
+  chipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' },
+
+  // Number picker
+  pickerRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', gap: 20, marginBottom: 18,
+  },
+  arrowBtn: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  arrowText: { color: '#FFFFFF', fontSize: 28, fontWeight: '300', lineHeight: 32 },
+  numberWrap: { alignItems: 'center', minWidth: 110 },
+  bigNumber: {
+    color: COLORS.gold, fontSize: 84, fontWeight: '900',
+    lineHeight: 88,
+  },
+  outOf: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+
+  // Dots
+  dotsRow: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    justifyContent: 'center', gap: 5, marginBottom: 22,
+  },
+  dot: { height: 8, borderRadius: 4 },
+  dotActive:     { backgroundColor: COLORS.gold },
+  dotInactive:   { backgroundColor: 'rgba(255,255,255,0.22)' },
+  dotRestricted: { backgroundColor: 'rgba(239,68,68,0.45)' },
+
+  // Confirm
+  confirmBtn: {
     backgroundColor: COLORS.gold,
-    paddingVertical: 15,
-    borderRadius: 28,
+    paddingVertical: 15, borderRadius: 999,
     alignItems: 'center',
     shadowColor: COLORS.gold,
+    shadowOpacity: 0.45, shadowRadius: 18,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
     elevation: 8,
   },
-  confirmText: {
-    color: '#000',
-    fontSize: 16,
-    fontWeight: '900',
-    letterSpacing: 0.6,
-  },
-  cardSection: {
-    marginBottom: 10,
-  },
-  cardSectionLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  cardRow: {
-    flexDirection: 'row',
-    gap: 5,
-  },
-  cardWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 3,
-  },
-  cardDivider: {
-    height: 1,
-    backgroundColor: COLORS.borderGlass,
-    marginBottom: 14,
-  },
+  confirmTxt: { color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
 });
