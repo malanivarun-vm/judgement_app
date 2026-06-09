@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary, fontSize: 10, fontWeight: '800',
     letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 8,
   },
-  handScroll: { maxHeight: 136 },
+  handScroll: { maxHeight: 180 },
   handGrid: {
     flexDirection: 'row', flexWrap: 'wrap',
     gap: 5, justifyContent: 'center', paddingTop: 4, paddingBottom: 8,

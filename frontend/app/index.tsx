@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,8 +11,12 @@ import {
   Alert,
   ActivityIndicator,
   StatusBar,
+  Animated,
+  Easing,
+  AccessibilityInfo,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
 import HowToPlayModal from '../components/HowToPlayModal';
 
@@ -30,6 +34,48 @@ export default function HomeScreen() {
   const [roomCode, setRoomCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [howToPlayVisible, setHowToPlayVisible] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const floatAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then(setReduceMotion)
+      .catch(() => setReduceMotion(false));
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, {
+          toValue: 1,
+          duration: 6500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(floatAnim, {
+          toValue: 0,
+          duration: 6500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [floatAnim, reduceMotion]);
+
+  const fireHaptic = async (kind: 'selection' | 'medium') => {
+    try {
+      if (kind === 'selection') {
+        await Haptics.selectionAsync();
+      } else {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+    } catch {
+      // ignore unsupported platforms
+    }
+  };
 
   const createRoom = async () => {
     if (!playerName.trim()) {
@@ -38,6 +84,7 @@ export default function HomeScreen() {
     }
     setLoading(true);
     try {
+      void fireHaptic('medium');
       const res = await fetch(`${BACKEND_URL}/api/rooms`, { method: 'POST' });
       const data = await res.json();
       const playerId = generateId();
@@ -50,7 +97,7 @@ export default function HomeScreen() {
           is_host: 'true',
         },
       });
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not create room. Please try again.');
     } finally {
       setLoading(false);
@@ -68,6 +115,7 @@ export default function HomeScreen() {
     }
     setLoading(true);
     try {
+      void fireHaptic('selection');
       const code = roomCode.trim().toUpperCase();
       const res = await fetch(`${BACKEND_URL}/api/rooms/${code}/exists`);
       const data = await res.json();
@@ -89,7 +137,7 @@ export default function HomeScreen() {
           is_host: 'false',
         },
       });
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not check room. Please try again.');
     } finally {
       setLoading(false);
@@ -103,19 +151,61 @@ export default function HomeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         {/* Decorative suit symbols */}
-        <View style={styles.decoRow}>
+        <Animated.View
+          style={[
+            styles.decoRow,
+            !reduceMotion && {
+              transform: [
+                {
+                  translateY: floatAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -6],
+                  }),
+                },
+              ],
+              opacity: floatAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.74, 1],
+              }),
+            },
+          ]}
+        >
           {Object.values(SUIT_SYMBOLS).map((s, i) => (
             <Text key={i} style={[styles.decoSuit, i % 2 === 0 ? styles.decoRed : styles.decoWhite]}>
               {s}
             </Text>
           ))}
-        </View>
+        </Animated.View>
 
-        <Text style={styles.title}>JUDGEMENT</Text>
-        <Text style={styles.subtitle}>The Trick-Taking Card Game</Text>
+        <Animated.View
+          style={[
+            styles.heroPanel,
+            !reduceMotion && {
+              transform: [
+                {
+                  translateY: floatAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -3],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Text style={styles.kicker}>Live Card Table</Text>
+          <Text style={styles.title} adjustsFontSizeToFit numberOfLines={1}>Judgement</Text>
+          <Text style={styles.subtitle}>Bid the exact number of tricks. Win the table. Miss by one and pay for it.</Text>
+
+          <View style={styles.heroChips}>
+            <View style={styles.heroChip}><Text style={styles.heroChipText}>Real-time</Text></View>
+            <View style={styles.heroChip}><Text style={styles.heroChipText}>3-7 players</Text></View>
+            <View style={styles.heroChip}><Text style={styles.heroChipText}>Exact bids</Text></View>
+          </View>
+        </Animated.View>
 
         {/* Player Name */}
-        <View style={styles.inputGroup}>
+        <View style={styles.panel}>
+          <View style={styles.inputGroup}>
           <Text style={styles.label}>Your Name</Text>
           <TextInput
             testID="player-name-input"
@@ -178,7 +268,10 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.howToPlayLink}
-          onPress={() => setHowToPlayVisible(true)}
+          onPress={async () => {
+            await fireHaptic('selection');
+            setHowToPlayVisible(true);
+          }}
           activeOpacity={0.7}
         >
           <Text style={styles.howToPlayText}>
@@ -186,6 +279,7 @@ export default function HomeScreen() {
             <Text style={styles.howToPlayAction}>How to Play →</Text>
           </Text>
         </TouchableOpacity>
+        </View>
 
         <HowToPlayModal
           visible={howToPlayVisible}
@@ -207,6 +301,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  heroPanel: {
+    width: '100%',
+    marginBottom: 18,
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+    backgroundColor: COLORS.surfaceSolid,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  kicker: {
+    color: COLORS.gold,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 6,
   },
   decoRow: {
     flexDirection: 'row',
@@ -233,8 +348,36 @@ const styles = StyleSheet.create({
   subtitle: {
     color: COLORS.textSecondary,
     fontSize: 14,
-    marginBottom: 32,
-    letterSpacing: 1,
+    lineHeight: 21,
+    marginTop: 10,
+    letterSpacing: 0.3,
+  },
+  heroChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+  heroChip: {
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  heroChipText: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  panel: {
+    width: '100%',
+    padding: 18,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: 'rgba(255,255,255,0.035)',
   },
   inputGroup: {
     width: '100%',
