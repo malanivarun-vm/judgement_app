@@ -24,7 +24,7 @@ const H_CHROME = 64;
 /** Scale factor (≤1) so `count` cards fit in ≤2 rows of the available width. */
 export function handCardScale(count: number, screenWidth: number): number {
   if (count <= 0) return 1;
-  const perRow = count <= 7 ? count : Math.ceil(count / 2);
+  const perRow = count <= 6 ? count : Math.ceil(count / 2);
   const available = Math.max(160, screenWidth - H_CHROME) - (perRow - 1) * GAP;
   const fitWidth = Math.floor(available / perRow);
   return Math.min(1, fitWidth / CARD_SIZES.hand.width);
