@@ -690,10 +690,10 @@ export default function GameScreen() {
                         </Text>
                         {isDealer && <Text style={styles.dealerBadge}>D</Text>}
                       </View>
-                      <Text style={styles.opponentScore}>{opp.total_score} pts</Text>
+                      <Text style={styles.opponentScore} numberOfLines={1}>{opp.total_score} pts</Text>
                     </View>
                   </View>
-                  <Text style={styles.opponentBody}>
+                  <Text style={styles.opponentBody} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                     {opp.has_bid || opp.bid !== null
                       ? `Bid ${opp.bid}  Won ${opp.tricks_won}`
                       : phase === 'bidding'
@@ -792,7 +792,7 @@ export default function GameScreen() {
             <View style={styles.selfMeta}>
               <View>
                 <Text style={styles.selfName}>{myInfo?.name || params.player_name}</Text>
-                <Text style={styles.selfSubtext}>
+                <Text style={styles.selfSubtext} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   {gameState.dealer_index === your_index ? 'Dealer' : 'Player'}
                   {myInfo?.bid !== null && myInfo?.bid !== undefined
                     ? ` • Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
