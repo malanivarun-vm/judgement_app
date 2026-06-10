@@ -690,7 +690,7 @@ export default function GameScreen() {
                         </Text>
                         {isDealer && <Text style={styles.dealerBadge}>D</Text>}
                       </View>
-                      <Text style={styles.opponentScore} numberOfLines={1}>{opp.total_score} pts</Text>
+                      <Text style={styles.opponentScore} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{opp.total_score} pts</Text>
                     </View>
                   </View>
                   <Text style={styles.opponentBody} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
