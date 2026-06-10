@@ -987,7 +987,7 @@ function StatusPill({
 }) {
   return (
     <View style={[styles.statusPill, muted && styles.statusPillMuted]}>
-      <Text style={styles.statusPillLabel}>{label}</Text>
+      <Text style={styles.statusPillLabel} numberOfLines={1}>{label}</Text>
       <Text style={[styles.statusPillValue, valueStyle]} numberOfLines={1}>
         {value}
       </Text>
@@ -1222,7 +1222,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   statusPill: {
-    minWidth: 84,
+    flexGrow: 1,
+    flexBasis: '28%',
     paddingHorizontal: 11,
     paddingVertical: 8,
     borderRadius: 14,
