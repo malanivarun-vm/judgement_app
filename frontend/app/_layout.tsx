@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { Text, TextInput } from 'react-native';
 import {
   useFonts,
   Outfit_900Black,
@@ -10,6 +11,12 @@ import {
   DMSans_600SemiBold,
 } from '@expo-google-fonts/dm-sans';
 import { JetBrainsMono_700Bold } from '@expo-google-fonts/jetbrains-mono';
+
+// Cap OS font scaling so user font-size settings can't break fixed layouts.
+// @ts-expect-error defaultProps is untyped on RN function components
+Text.defaultProps = { ...(Text.defaultProps ?? {}), maxFontSizeMultiplier: 1.2 };
+// @ts-expect-error defaultProps is untyped on RN function components
+TextInput.defaultProps = { ...(TextInput.defaultProps ?? {}), maxFontSizeMultiplier: 1.2 };
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
