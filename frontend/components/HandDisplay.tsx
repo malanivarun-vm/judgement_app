@@ -1,10 +1,10 @@
-// Scrollable hand grid — auto-sizes cards for large hands.
-// Replaces the inline hand rendering in game.tsx.
+// Scrollable hand grid — auto-scales cards so the hand always fits
+// within the screen width in at most two rows.
 
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
 import PlayingCard, { CardData } from './PlayingCard';
-import { COLORS, CardStyle } from '../utils/theme';
+import { COLORS, CardStyle, CARD_SIZES } from '../utils/theme';
 
 interface HandDisplayProps {
   hand: CardData[];
@@ -16,6 +16,20 @@ interface HandDisplayProps {
   showLabel?: boolean;
 }
 
+const GAP = 6;
+// Horizontal chrome around the grid: tableShell 12+12, handDock 8+8,
+// container 12+12 = 64. Keep in sync with game.tsx if those paddings change.
+const H_CHROME = 64;
+
+/** Scale factor (≤1) so `count` cards fit in ≤2 rows of the available width. */
+export function handCardScale(count: number, screenWidth: number): number {
+  if (count <= 0) return 1;
+  const perRow = count <= 7 ? count : Math.ceil(count / 2);
+  const available = Math.max(160, screenWidth - H_CHROME) - (perRow - 1) * GAP;
+  const fitWidth = Math.floor(available / perRow);
+  return Math.min(1, fitWidth / CARD_SIZES.hand.width);
+}
+
 export default function HandDisplay({
   hand,
   playableIndices = null,
@@ -24,8 +38,9 @@ export default function HandDisplay({
   cardStyle = 'minimal',
   showLabel = true,
 }: HandDisplayProps) {
+  const { width } = useWindowDimensions();
   const isPlayPhase = phase === 'playing';
-  const cardSize = hand.length > 8 ? 'trick' : 'hand';
+  const scale = handCardScale(hand.length, width);
 
   return (
     <View style={styles.container}>
@@ -49,7 +64,8 @@ export default function HandDisplay({
             <PlayingCard
               key={`${card.rank}-${card.suit}-${i}`}
               card={card}
-              size={cardSize}
+              size="hand"
+              scale={scale}
               cardStyle={cardStyle}
               highlighted={canPlay}
               dimmed={isDimmed}
@@ -84,7 +100,7 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: GAP,
     justifyContent: 'center',
     paddingTop: 14,
     paddingBottom: 6,

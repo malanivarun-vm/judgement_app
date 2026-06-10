@@ -14,6 +14,7 @@ export interface CardData { suit: string; rank: string; }
 interface Props {
   card: CardData;
   size?: CardSizeKey;
+  scale?: number;
   cardStyle?: CardStyle;
   highlighted?: boolean;
   dimmed?: boolean;
@@ -44,13 +45,20 @@ const FONT_SIZES: Record<CardSizeKey, { rank: number; suit: number; center: numb
 
 const FACE_CARDS = new Set(['J', 'Q', 'K']);
 
-export default function PlayingCard({ card, size = 'hand', cardStyle = 'minimal', highlighted, dimmed, onPress, disabled }: Props) {
+export default function PlayingCard({ card, size = 'hand', scale = 1, cardStyle = 'minimal', highlighted, dimmed, onPress, disabled }: Props) {
   const [reduceMotion, setReduceMotion] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const liftAnim  = useRef(new Animated.Value(0)).current;
 
-  const dims   = CARD_SIZES[size];
-  const fonts  = FONT_SIZES[size];
+  const base  = CARD_SIZES[size];
+  const baseF = FONT_SIZES[size];
+  const dims  = { width: Math.round(base.width * scale), height: Math.round(base.height * scale) };
+  const fonts = {
+    rank:   Math.round(baseF.rank * scale),
+    suit:   Math.round(baseF.suit * scale),
+    center: Math.round(baseF.center * scale),
+    pip:    Math.round(baseF.pip * scale),
+  };
   const symbol = SUIT_SYMBOLS[card.suit] || '?';
   const color  = SUIT_COLORS[card.suit]  || '#111';
   const isFace = FACE_CARDS.has(card.rank);

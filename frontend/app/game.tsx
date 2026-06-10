@@ -1336,7 +1336,7 @@ const styles = StyleSheet.create({
   trickTable: {
     width: '100%',
     maxWidth: 420,
-    minHeight: 210,
+    minHeight: 160,
     borderRadius: 26,
     borderWidth: 1,
     borderColor: COLORS.borderAccent,
