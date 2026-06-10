@@ -25,11 +25,13 @@ export const COLORS = {
   cardBg:          '#FAFAFA',
 } as const;
 
+// ︎ = VARIATION SELECTOR-15: forces text presentation so OEM emoji
+// fonts don't substitute colored emoji glyphs for the suit characters.
 export const SUIT_SYMBOLS: Record<string, string> = {
-  hearts: '♥',
-  diamonds: '♦',
-  spades: '♠',
-  clubs: '♣',
+  hearts: '♥︎',
+  diamonds: '♦︎',
+  spades: '♠︎',
+  clubs: '♣︎',
 };
 
 export const SUIT_COLORS: Record<string, string> = {

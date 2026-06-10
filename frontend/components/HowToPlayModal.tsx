@@ -10,7 +10,7 @@ import {
   Platform,
   AccessibilityInfo,
 } from 'react-native';
-import { COLORS } from '../utils/theme';
+import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
 
 const SCORE_ROWS = [
   { label: 'Exact bid',            value: '+bid × 10 pts', positive: true },
@@ -80,15 +80,15 @@ export default function HowToPlayModal({ visible, onClose }: Props) {
               {' if they can. If not, play any card. Highest trump wins; otherwise highest card of the lead suit wins.'}
             </Section>
 
-            <Section label="♠ Trump Suits">
+            <Section label={`${SUIT_SYMBOLS.spades} Trump Suits`}>
               {'Trump rotates each round: '}
-              <Text style={styles.red}>♥ Hearts</Text>
+              <Text style={styles.red}>{SUIT_SYMBOLS.hearts} Hearts</Text>
               {' → '}
-              <Text style={styles.bold}>♠ Spades</Text>
+              <Text style={styles.bold}>{SUIT_SYMBOLS.spades} Spades</Text>
               {' → '}
-              <Text style={styles.red}>♦ Diamonds</Text>
+              <Text style={styles.red}>{SUIT_SYMBOLS.diamonds} Diamonds</Text>
               {' → '}
-              <Text style={styles.bold}>♣ Clubs</Text>
+              <Text style={styles.bold}>{SUIT_SYMBOLS.clubs} Clubs</Text>
               {'. Trump beats any non-trump card.'}
             </Section>
 
