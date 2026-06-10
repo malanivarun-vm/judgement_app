@@ -1,20 +1,23 @@
 from fastapi import FastAPI, APIRouter, WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-import os
 import logging
 import json
+import math
 import uuid
 import random
 import string
 from pathlib import Path
-from pydantic import BaseModel
 from typing import Dict, List, Optional
 from game_engine import (
-    shuffle_and_deal, get_trump_suit, get_max_cards,
+    shuffle_and_deal, shuffle_and_deal_partial, sort_hand,
+    get_trump_suit, get_max_cards,
     is_valid_play, determine_trick_winner, calculate_round_score,
-    get_restricted_bids, SUITS
+    get_restricted_bids
 )
+
+VARIATIONS = ('v1', 'v1.1', 'v2', 'v3')
+VALID_SUITS = ('hearts', 'spades', 'diamonds', 'clubs')
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -49,6 +52,10 @@ class GameRoom:
         self.bidding_order: List[int] = []
         self.bidding_position = 0
         self.last_completed_trick: Optional[Dict] = None
+        self.variation = 'v1'
+        self.variation_config: Dict = {}
+        self.remaining_deck: List[Dict] = []
+        self.trump_caller_index = -1
 
     def get_state_for_player(self, player_id: str) -> Dict:
         player = next((p for p in self.players if p['id'] == player_id), None)
@@ -99,6 +106,9 @@ class GameRoom:
             'round_history': self.round_history,
             'restricted_bids': restricted_bids,
             'last_completed_trick': self.last_completed_trick,
+            'variation': self.variation,
+            'variation_config': self.variation_config,
+            'trump_caller_index': self.trump_caller_index,
         }
 
     async def broadcast_state(self):
@@ -109,10 +119,46 @@ class GameRoom:
             except Exception as e:
                 logger.error(f"Error broadcasting to {pid}: {e}")
 
+    def set_variation(self, player_id: str, variation: str, config: Dict) -> Optional[str]:
+        player = next((p for p in self.players if p['id'] == player_id), None)
+        if not player or not player['is_host']:
+            return "Only the host can set the variation"
+        if self.phase != 'waiting':
+            return "Game already started"
+        if variation not in VARIATIONS:
+            return "Unknown variation"
+        self.variation = variation
+        self.variation_config = self._sanitize_config(variation, config or {})
+        return None
+
+    def _sanitize_config(self, variation: str, config: Dict) -> Dict:
+        if variation not in ('v1.1', 'v3'):
+            return {}
+        n = max(3, len(self.players))
+        max_cards = get_max_cards(n)
+        max_rounds = 17 if variation == 'v3' else max_cards
+        try:
+            cards = int(config.get('cards_per_round', 5))
+        except (TypeError, ValueError):
+            cards = 5
+        try:
+            rounds = int(config.get('total_rounds', 5))
+        except (TypeError, ValueError):
+            rounds = 5
+        return {
+            'cards_per_round': max(1, min(cards, max_cards)),
+            'total_rounds': max(1, min(rounds, max_rounds)),
+        }
+
     def start_game(self):
         num_players = len(self.players)
         self.max_cards = get_max_cards(num_players)
-        self.total_rounds = self.max_cards
+        if self.variation in ('v1.1', 'v3'):
+            # Re-clamp against the final player count
+            self.variation_config = self._sanitize_config(self.variation, self.variation_config)
+            self.total_rounds = self.variation_config['total_rounds']
+        else:
+            self.total_rounds = self.max_cards
         self.dealer_index = random.randint(0, num_players - 1)
         for p in self.players:
             p['total_score'] = 0
@@ -123,24 +169,81 @@ class GameRoom:
     def _start_round(self):
         self.current_round += 1
         n = len(self.players)
-        self.cards_this_round = self.max_cards - (self.current_round - 1)
-        self.trump_suit = get_trump_suit(self.current_round)
+        if self.variation in ('v1.1', 'v3'):
+            self.cards_this_round = self.variation_config['cards_per_round']
+        else:
+            self.cards_this_round = self.max_cards - (self.current_round - 1)
 
-        hands = shuffle_and_deal(n, self.cards_this_round)
-        for i, p in enumerate(self.players):
-            p['hand'] = hands[i]
+        for p in self.players:
             p['bid'] = None
             p['has_bid'] = False
             p['tricks_won'] = 0
 
         self.bidding_order = [(self.dealer_index + 1 + i) % n for i in range(n)]
         self.bidding_position = 0
-        self.current_player_index = self.bidding_order[0]
         self.current_trick = []
         self.lead_suit = None
         self.tricks_played = 0
         self.last_completed_trick = None
-        self.phase = 'bidding'
+        self.remaining_deck = []
+        self.trump_caller_index = -1
+
+        if self.variation == 'v2':
+            # Partial deal; trump is called before the second batch
+            batch = math.ceil(self.cards_this_round / 2)
+            hands, remaining = shuffle_and_deal_partial(n, self.cards_this_round, batch)
+            for i, p in enumerate(self.players):
+                p['hand'] = hands[i]
+            self.remaining_deck = remaining
+            self.trump_suit = None
+            self.trump_caller_index = (self.dealer_index + 1) % n
+            self.current_player_index = self.trump_caller_index
+            self.phase = 'trump_selection'
+        else:
+            hands = shuffle_and_deal(n, self.cards_this_round)
+            for i, p in enumerate(self.players):
+                p['hand'] = hands[i]
+            # V3: trump is chosen by the highest bidder after bidding
+            self.trump_suit = None if self.variation == 'v3' else get_trump_suit(self.current_round)
+            self.current_player_index = self.bidding_order[0]
+            self.phase = 'bidding'
+
+    def call_trump(self, player_id: str, suit: Optional[str]) -> Optional[str]:
+        idx = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
+        if idx == -1:
+            return "Player not found"
+        if self.phase not in ('trump_selection', 'trump_selection_v3'):
+            return "Not in trump selection phase"
+        if idx != self.trump_caller_index:
+            return "Not your turn to call trump"
+
+        if self.phase == 'trump_selection':
+            if suit is None:
+                # Blind draw: random suit from the un-dealt cards
+                source = self.remaining_deck or [{'suit': s} for s in VALID_SUITS]
+                self.trump_suit = random.choice(source)['suit']
+            elif suit in VALID_SUITS:
+                self.trump_suit = suit
+            else:
+                return "Invalid suit"
+
+            # Deal the second batch and move to bidding
+            n = len(self.players)
+            per = self.cards_this_round - len(self.players[0]['hand'])
+            for i, p in enumerate(self.players):
+                p['hand'].extend(self.remaining_deck[i * per:(i + 1) * per])
+                sort_hand(p['hand'])
+            self.remaining_deck = self.remaining_deck[n * per:]
+            self.current_player_index = self.bidding_order[0]
+            self.phase = 'bidding'
+        else:  # trump_selection_v3
+            if suit not in VALID_SUITS:
+                return "Invalid suit"
+            self.trump_suit = suit
+            self.current_player_index = (self.dealer_index + 1) % len(self.players)
+            self.phase = 'playing'
+
+        return None
 
     def place_bid(self, player_id: str, bid: int) -> Optional[str]:
         idx = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
@@ -167,8 +270,20 @@ class GameRoom:
 
         self.bidding_position += 1
         if self.bidding_position >= len(self.players):
-            self.phase = 'playing'
-            self.current_player_index = (self.dealer_index + 1) % len(self.players)
+            if self.variation == 'v3':
+                # Highest bidder calls trump (ties -> earliest in bidding order)
+                best_idx = self.bidding_order[0]
+                best_bid = -1
+                for i in self.bidding_order:
+                    if self.players[i]['bid'] > best_bid:
+                        best_bid = self.players[i]['bid']
+                        best_idx = i
+                self.trump_caller_index = best_idx
+                self.current_player_index = best_idx
+                self.phase = 'trump_selection_v3'
+            else:
+                self.phase = 'playing'
+                self.current_player_index = (self.dealer_index + 1) % len(self.players)
         else:
             self.current_player_index = self.bidding_order[self.bidding_position]
 
@@ -367,6 +482,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     continue
                 room.start_game()
 
+            elif action == 'set_variation':
+                error = room.set_variation(player_id, data.get('variation'), data.get('config') or {})
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
+            elif action == 'call_trump':
+                error = room.call_trump(player_id, data.get('suit'))
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
             elif action == 'place_bid':
                 error = room.place_bid(player_id, int(data.get('bid', 0)))
                 if error:
@@ -428,8 +555,3 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

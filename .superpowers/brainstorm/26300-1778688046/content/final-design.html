@@ -1,0 +1,166 @@
+<h2>Final Design — Bidding Modal</h2>
+<p class="subtitle">Card grid at the top so you can see your hand. Swipe row for bid number. Both scale from 1 card to 17 cards.</p>
+
+<style>
+  .center { display:flex; justify-content:center; gap:32px; flex-wrap:wrap; margin:24px 0; }
+  .phone-wrap { display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .phone-label { font-size:12px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:#a0a0b0; text-align:center; }
+  .phone { width:240px; height:460px; background:#0a0f0c; border-radius:28px; border:2px solid #2a2f2c; overflow:hidden; position:relative; box-shadow:0 8px 32px rgba(0,0,0,0.5); display:flex; flex-direction:column; }
+
+  .status-bar { background:#111810; padding:5px 10px; display:flex; gap:4px; flex-wrap:wrap; flex-shrink:0; }
+  .pill { background:#1e2a22; color:#6fcf97; font-size:7px; padding:2px 5px; border-radius:10px; border:1px solid #2e4a38; }
+  .top-stub { background:#0a0f0c; flex:1; }
+
+  .modal-full { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(3,10,7,0.85); display:flex; align-items:center; justify-content:center; }
+  .modal-box { background:#0d1f16; border-radius:16px; border:1px solid #2a4a3a; padding:12px; width:210px; }
+
+  .mini-label { font-size:6px; color:#557a66; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:4px; }
+
+  /* 5-card grid (single row) */
+  .card-row { display:flex; gap:5px; margin-bottom:8px; }
+
+  /* 17-card grid (2 rows × 9) */
+  .card-grid-17 { display:grid; grid-template-columns:repeat(9,1fr); gap:2px; margin-bottom:8px; }
+
+  .card-xs { width:16px; height:23px; background:white; border-radius:2px; border:1px solid #ccc; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; padding:1px 2px; font-size:6px; font-weight:700; color:#c0392b; box-shadow:0 1px 2px rgba(0,0,0,0.3); }
+  .card-xs.black { color:#1a1a2e; }
+
+  .card-sm { width:28px; height:40px; background:white; border-radius:4px; border:1px solid #ddd; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; padding:2px 3px; font-size:8px; font-weight:700; color:#c0392b; box-shadow:0 1px 4px rgba(0,0,0,0.3); }
+  .card-sm.black { color:#1a1a2e; }
+
+  .divider { height:1px; background:#1e3028; margin-bottom:8px; }
+  .bid-title { font-size:9px; color:#6fcf97; font-weight:600; text-align:center; margin-bottom:2px; }
+  .bid-meta { font-size:7px; color:#557a66; text-align:center; margin-bottom:8px; }
+
+  /* Swipe row */
+  .swipe-wrap { position:relative; overflow:hidden; margin-bottom:3px; }
+  .swipe-row { display:flex; gap:5px; }
+  .num-chip { min-width:30px; height:30px; background:#1a2a22; border:1px solid #2e4a38; color:#bbb; font-size:10px; font-weight:700; border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .num-chip.sel { background:#c9a227; color:#0a0f0c; border-color:#c9a227; box-shadow:0 0 8px rgba(201,162,39,0.45); transform:scale(1.05); }
+  .num-chip.restricted { background:#3a1515; border-color:#6b2323; color:#e57373; font-size:8px; }
+  .fade-r { position:absolute; right:0; top:0; bottom:0; width:30px; background:linear-gradient(to right,transparent,#0d1f16); pointer-events:none; }
+  .swipe-hint { font-size:7px; color:#c9a227; text-align:right; margin-bottom:8px; opacity:0.8; }
+
+  .confirm-btn { background:#c9a227; color:#0a0f0c; font-size:10px; font-weight:700; border-radius:8px; padding:7px; text-align:center; }
+
+  /* Annotation callouts */
+  .annotation { background:#0d1a14; border:1px solid #1e3028; border-radius:6px; padding:6px 10px; font-size:10px; color:#888; line-height:1.5; max-width:240px; text-align:left; }
+  .annotation b { color:#aaa; }
+  .annotation .num { display:inline-block; width:16px; height:16px; background:#1e3028; color:#6fcf97; border-radius:50%; font-size:9px; font-weight:700; text-align:center; line-height:16px; margin-right:4px; flex-shrink:0; }
+
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:9px; font-weight:600; }
+  .badge-green { background:#0e3020; color:#6fcf97; border:1px solid #1e5038; }
+  .badge-gold { background:#1a1400; color:#c9a227; border:1px solid #3a2e00; }
+
+  .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; max-width:700px; margin:0 auto 16px; }
+  .summary-card { background:#0d1a14; border:1px solid #1e3028; border-radius:8px; padding:10px 14px; }
+  .summary-card h4 { font-size:11px; color:#6fcf97; margin:0 0 6px; }
+  .summary-card p { font-size:11px; color:#888; margin:0; line-height:1.5; }
+</style>
+
+<div class="center">
+
+  <!-- 5-card round -->
+  <div class="phone-wrap">
+    <div class="phone-label">5-card round (7 players)</div>
+    <div class="phone">
+      <div class="status-bar"><span class="pill">♠ Spades</span><span class="pill">Round 3/7</span><span class="pill">5 cards</span></div>
+      <div class="top-stub"></div>
+      <div class="modal-full">
+        <div class="modal-box">
+          <div class="mini-label">Your hand — 5 cards</div>
+          <div class="card-row">
+            <div class="card-sm">A<br/>♥</div>
+            <div class="card-sm black">K<br/>♠</div>
+            <div class="card-sm">7<br/>♦</div>
+            <div class="card-sm black">J<br/>♣</div>
+            <div class="card-sm black">3<br/>♠</div>
+          </div>
+          <div class="divider"></div>
+          <div class="bid-title">How many tricks will you take?</div>
+          <div class="bid-meta">♠ Spades trump · 5 cards · bid ≠ 4 (dealer)</div>
+          <div class="swipe-wrap">
+            <div class="swipe-row">
+              <div class="num-chip">0</div>
+              <div class="num-chip">1</div>
+              <div class="num-chip sel">2</div>
+              <div class="num-chip">3</div>
+              <div class="num-chip restricted">4✕</div>
+              <div class="num-chip">5</div>
+            </div>
+          </div>
+          <div style="font-size:7px;color:#557a66;text-align:center;margin-bottom:8px;">all bids visible · 4 restricted for dealer</div>
+          <div class="confirm-btn">Lock in 2</div>
+        </div>
+      </div>
+    </div>
+    <div class="annotation">
+      <b>Small hand (≤7 cards)</b><br/>
+      Single card row, all chips visible at once — no scrolling needed. Clean and fast.
+    </div>
+  </div>
+
+  <!-- 17-card round -->
+  <div class="phone-wrap">
+    <div class="phone-label">17-card round (3 players)</div>
+    <div class="phone">
+      <div class="status-bar"><span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span></div>
+      <div class="top-stub"></div>
+      <div class="modal-full">
+        <div class="modal-box">
+          <div class="mini-label">Your hand — 17 cards</div>
+          <div class="card-grid-17">
+            <div class="card-xs">A<br/>♥</div><div class="card-xs black">K<br/>♠</div><div class="card-xs">Q<br/>♦</div>
+            <div class="card-xs black">J<br/>♣</div><div class="card-xs black">10<br/>♠</div><div class="card-xs">9<br/>♥</div>
+            <div class="card-xs black">8<br/>♣</div><div class="card-xs">7<br/>♦</div><div class="card-xs black">7<br/>♠</div>
+            <div class="card-xs">6<br/>♥</div><div class="card-xs black">5<br/>♣</div><div class="card-xs">4<br/>♦</div>
+            <div class="card-xs black">4<br/>♠</div><div class="card-xs">3<br/>♥</div><div class="card-xs black">3<br/>♣</div>
+            <div class="card-xs">2<br/>♦</div><div class="card-xs black">2<br/>♠</div>
+          </div>
+          <div class="divider"></div>
+          <div class="bid-title">How many tricks will you take?</div>
+          <div class="bid-meta">♠ Spades trump · 17 cards · bid ≠ 6 (dealer)</div>
+          <div class="swipe-wrap">
+            <div class="swipe-row">
+              <div class="num-chip">0</div>
+              <div class="num-chip">1</div>
+              <div class="num-chip">2</div>
+              <div class="num-chip sel">3</div>
+              <div class="num-chip">4</div>
+              <div class="num-chip">5</div>
+              <div class="num-chip restricted">6✕</div>
+              <div class="num-chip">7</div>
+            </div>
+            <div class="fade-r"></div>
+          </div>
+          <div class="swipe-hint">swipe for 8 – 17 →</div>
+          <div class="confirm-btn">Lock in 3</div>
+        </div>
+      </div>
+    </div>
+    <div class="annotation">
+      <b>Large hand (17 cards)</b><br/>
+      2-row grid fits all cards. Swipe row shows 8 chips, rest revealed on swipe. Restricted chip visible in red whenever it's in view.
+    </div>
+  </div>
+
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <h4>Card display</h4>
+    <p>≤9 cards → single row (larger cards)<br/>10–17 cards → 2-row 9×2 grid (compact cards)<br/>Threshold auto-calculated from <code>cardsThisRound</code></p>
+  </div>
+  <div class="summary-card">
+    <h4>Bid number row</h4>
+    <p>Horizontal <code>ScrollView</code>, chips 30×30px, gap 5px<br/>Restricted bid shown as red chip with ✕<br/>Fade-out gradient on right edge signals more chips exist</p>
+  </div>
+  <div class="summary-card">
+    <h4>Files changed</h4>
+    <p><code>BiddingModal.tsx</code> — card grid + swipe row replaces old bid grid<br/><code>game.tsx</code> — no changes needed</p>
+  </div>
+  <div class="summary-card">
+    <h4>Behaviour unchanged</h4>
+    <p>Backend, WebSocket, game logic untouched.<br/>Restricted bid logic stays the same — only the display changes.</p>
+  </div>
+</div>

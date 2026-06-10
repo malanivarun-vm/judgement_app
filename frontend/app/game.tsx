@@ -57,7 +57,17 @@ interface GameState {
   round_history: any[];
   restricted_bids: number[];
   last_completed_trick: any;
+  variation: string;
+  variation_config: { cards_per_round?: number; total_rounds?: number };
+  trump_caller_index: number;
 }
+
+const VARIATIONS = [
+  { key: 'v1', name: 'Classic', desc: 'Decreasing cards each round' },
+  { key: 'v1.1', name: 'Fixed Rounds', desc: 'Same cards every round' },
+  { key: 'v2', name: 'Trump Call', desc: 'Call trump after half the deal' },
+  { key: 'v3', name: 'Bid First', desc: 'Highest bidder picks trump' },
+];
 
 export default function GameScreen() {
   const params = useLocalSearchParams<{
@@ -77,6 +87,12 @@ export default function GameScreen() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const trickResultTimer = useRef<any>(null);
   const prevTrickRef = useRef<string>('');
+  const prevPhaseRef = useRef<string>('');
+  const [showBidLock, setShowBidLock] = useState(false);
+  const bidLockTimer = useRef<any>(null);
+  const bidLockAnim = useRef(new Animated.Value(0)).current;
+  const [trumpReveal, setTrumpReveal] = useState<string | null>(null);
+  const trumpRevealTimer = useRef<any>(null);
   const ambientPulse = useRef(new Animated.Value(0)).current;
   const turnPulse = useRef(new Animated.Value(0)).current;
   const trickPop = useRef(new Animated.Value(0)).current;
@@ -271,6 +287,46 @@ export default function GameScreen() {
     }
   }, [gameState, reduceMotion, turnPulse]);
 
+  // Phase transition effects: bid lock confirmation + trump reveal flash
+  useEffect(() => {
+    if (!gameState) return;
+    const prev = prevPhaseRef.current;
+    const next = gameState.phase;
+    if (prev === next) return;
+    prevPhaseRef.current = next;
+
+    if (prev === 'bidding' && (next === 'playing' || next === 'trump_selection_v3')) {
+      setShowBidLock(true);
+      if (reduceMotionRef.current) {
+        bidLockAnim.setValue(1);
+      } else {
+        bidLockAnim.setValue(0);
+        Animated.timing(bidLockAnim, {
+          toValue: 1,
+          duration: 320,
+          easing: Easing.out(Easing.back(1.4)),
+          useNativeDriver: true,
+        }).start();
+      }
+      void fireHaptic('success');
+      if (bidLockTimer.current) clearTimeout(bidLockTimer.current);
+      bidLockTimer.current = setTimeout(() => setShowBidLock(false), 2500);
+    }
+
+    if ((prev === 'trump_selection' || prev === 'trump_selection_v3') && gameState.trump_suit) {
+      setTrumpReveal(gameState.trump_suit);
+      if (trumpRevealTimer.current) clearTimeout(trumpRevealTimer.current);
+      trumpRevealTimer.current = setTimeout(() => setTrumpReveal(null), 1500);
+    }
+  }, [gameState, bidLockAnim, fireHaptic]);
+
+  useEffect(() => {
+    return () => {
+      if (bidLockTimer.current) clearTimeout(bidLockTimer.current);
+      if (trumpRevealTimer.current) clearTimeout(trumpRevealTimer.current);
+    };
+  }, []);
+
   // Loading state
   if (!gameState) {
     return (
@@ -306,13 +362,40 @@ export default function GameScreen() {
 
   // === WAITING / LOBBY ===
   if (phase === 'waiting') {
+    const variation = gameState.variation || 'v1';
+    const variationConfig = gameState.variation_config || {};
+    const selectedVariation = VARIATIONS.find((v) => v.key === variation) || VARIATIONS[0];
+    const needsConfig = variation === 'v1.1' || variation === 'v3';
+    const maxCardsPerRound = Math.floor(52 / Math.max(3, players.length));
+    const maxRounds = variation === 'v3' ? 17 : maxCardsPerRound;
+    const cardsPerRound = variationConfig.cards_per_round ?? 5;
+    const totalRounds = variationConfig.total_rounds ?? 5;
+
+    const selectVariation = (key: string) => {
+      const config = key === 'v1.1' || key === 'v3'
+        ? { cards_per_round: cardsPerRound, total_rounds: totalRounds }
+        : {};
+      void sendAction({ action: 'set_variation', variation: key, config }, 'selection');
+    };
+
+    const updateConfig = (field: 'cards_per_round' | 'total_rounds', delta: number) => {
+      const max = field === 'cards_per_round' ? maxCardsPerRound : maxRounds;
+      const current = field === 'cards_per_round' ? cardsPerRound : totalRounds;
+      const next = Math.max(1, Math.min(current + delta, max));
+      if (next === current) return;
+      void sendAction({
+        action: 'set_variation',
+        variation,
+        config: { cards_per_round: cardsPerRound, total_rounds: totalRounds, [field]: next },
+      }, 'selection');
+    };
+
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.lobbyWrap}>
-          <TouchableOpacity testID="leave-btn" style={styles.backBtn} onPress={handleLeave}>
-            <Text style={styles.backBtnText}>← Back</Text>
-          </TouchableOpacity>
-
+        <TouchableOpacity testID="leave-btn" style={styles.backBtn} onPress={handleLeave}>
+          <Text style={styles.backBtnText}>← Back</Text>
+        </TouchableOpacity>
+        <ScrollView contentContainerStyle={styles.lobbyWrap}>
           <Text style={styles.lobbyTitle}>JUDGEMENT</Text>
 
           <View style={styles.roomCodeBox}>
@@ -346,6 +429,59 @@ export default function GameScreen() {
             ))}
           </View>
 
+          <View style={styles.variationSection}>
+            <Text style={styles.variationLabel}>GAME VARIATION</Text>
+            {isHost ? (
+              <View style={styles.variationGrid}>
+                {VARIATIONS.map((v) => {
+                  const selected = v.key === variation;
+                  return (
+                    <TouchableOpacity
+                      key={v.key}
+                      testID={`variation-${v.key}`}
+                      style={[styles.variationOption, selected && styles.variationOptionSelected]}
+                      onPress={() => selectVariation(v.key)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.variationName, selected && styles.variationNameSelected]}>
+                        {v.name}
+                      </Text>
+                      <Text style={styles.variationDesc}>{v.desc}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : (
+              <View style={styles.variationReadonly}>
+                <Text style={styles.variationName}>{selectedVariation.name}</Text>
+                <Text style={styles.variationDesc}>{selectedVariation.desc}</Text>
+              </View>
+            )}
+
+            {needsConfig && (
+              isHost ? (
+                <View style={styles.configRows}>
+                  <ConfigStepper
+                    label="Cards per round"
+                    value={cardsPerRound}
+                    max={maxCardsPerRound}
+                    onChange={(delta) => updateConfig('cards_per_round', delta)}
+                  />
+                  <ConfigStepper
+                    label="Number of rounds"
+                    value={totalRounds}
+                    max={maxRounds}
+                    onChange={(delta) => updateConfig('total_rounds', delta)}
+                  />
+                </View>
+              ) : (
+                <Text style={styles.configReadonlyText}>
+                  {cardsPerRound} cards per round • {totalRounds} rounds
+                </Text>
+              )
+            )}
+          </View>
+
           {isHost && players.length >= 3 && (
             <TouchableOpacity
               testID="start-game-btn"
@@ -364,7 +500,7 @@ export default function GameScreen() {
           )}
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -465,6 +601,11 @@ export default function GameScreen() {
   const trumpSymbol = SUIT_SYMBOLS[gameState.trump_suit] || '';
   const showBiddingModal = phase === 'bidding' && isMyTurn;
   const seatCount = opponents.length;
+  const totalBids = players.filter((p) => p.has_bid).reduce((sum, p) => sum + (p.bid ?? 0), 0);
+  const showTrumpSelection = phase === 'trump_selection' || phase === 'trump_selection_v3';
+  const trumpCaller = players[gameState.trump_caller_index];
+  const iAmTrumpCaller = gameState.trump_caller_index === your_index;
+  const isTightGame = totalBids > gameState.cards_this_round;
 
   // Determine trick cards to display
   const displayTrickCards = trickResult
@@ -518,6 +659,7 @@ export default function GameScreen() {
               <StatusPill label="Round" value={`${gameState.current_round}/${gameState.total_rounds}`} />
               <StatusPill label="Cards" value={`${gameState.cards_this_round}`} />
               <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
+              <StatusPill label="Total Bids" value={`${totalBids}`} />
               <StatusPill label={connected ? 'Live' : 'Offline'} value={connected ? 'Connected' : 'Retrying'} muted={!connected} />
             </View>
           </View>
@@ -686,9 +828,149 @@ export default function GameScreen() {
             restrictedBids={gameState.restricted_bids || []}
             onPlaceBid={(bid) => void sendAction({ action: 'place_bid', bid }, 'medium')}
           />
+
+          {showTrumpSelection && !showBidLock && (
+            <View style={styles.trumpOverlay}>
+              <View style={styles.trumpPanel}>
+                {iAmTrumpCaller ? (
+                  <>
+                    <Text style={styles.trumpTitle}>
+                      {phase === 'trump_selection' ? 'Call Trump' : 'You won the bid'}
+                    </Text>
+                    <Text style={styles.trumpSubtitle}>
+                      {phase === 'trump_selection'
+                        ? `You've seen ${gameState.your_hand.length} of ${gameState.cards_this_round} cards`
+                        : 'Choose the trump suit for this round'}
+                    </Text>
+                    <View style={styles.trumpHandRow}>
+                      {gameState.your_hand.map((c, i) => (
+                        <PlayingCard key={`${c.suit}-${c.rank}-${i}`} card={c} size="small" />
+                      ))}
+                    </View>
+                    <View style={styles.suitGrid}>
+                      {['hearts', 'diamonds', 'spades', 'clubs'].map((s) => (
+                        <TouchableOpacity
+                          key={s}
+                          testID={`trump-suit-${s}`}
+                          style={styles.suitButton}
+                          onPress={() => void sendAction({ action: 'call_trump', suit: s }, 'medium')}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[styles.suitButtonSymbol, { color: SUIT_DISPLAY_COLORS[s] }]}>
+                            {SUIT_SYMBOLS[s]}
+                          </Text>
+                          <Text style={styles.suitButtonLabel}>{s}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {phase === 'trump_selection' && (
+                      <TouchableOpacity
+                        testID="trump-blind-draw"
+                        style={styles.blindDrawButton}
+                        onPress={() => void sendAction({ action: 'call_trump', suit: null }, 'medium')}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.blindDrawText}>Blind Draw — random suit</Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <ActivityIndicator size="small" color={COLORS.gold} />
+                    <Text style={styles.trumpWaitText}>
+                      Waiting for {trumpCaller?.name || 'player'} to{' '}
+                      {phase === 'trump_selection' ? 'call trump' : 'choose trump'}
+                    </Text>
+                  </>
+                )}
+              </View>
+            </View>
+          )}
+
+          {trumpReveal && (
+            <View style={styles.trumpRevealBanner} pointerEvents="none">
+              <Text style={styles.trumpRevealText}>
+                Trump:{' '}
+                <Text style={{ color: SUIT_DISPLAY_COLORS[trumpReveal] }}>
+                  {SUIT_SYMBOLS[trumpReveal]}
+                </Text>{' '}
+                {trumpReveal.charAt(0).toUpperCase() + trumpReveal.slice(1)}
+              </Text>
+            </View>
+          )}
+
+          {showBidLock && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.bidLockOverlay,
+                {
+                  opacity: bidLockAnim,
+                  transform: [
+                    {
+                      scale: bidLockAnim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <View style={styles.bidLockPanel}>
+                <Text style={styles.bidLockTitle}>All bids locked!</Text>
+                <Text style={styles.bidLockTotal}>
+                  Total bids: {totalBids} / {gameState.cards_this_round} tricks
+                </Text>
+                <Text style={[styles.bidLockVerdict, { color: isTightGame ? COLORS.danger : COLORS.success }]}>
+                  {isTightGame ? 'Tight game' : 'Loose game'}
+                </Text>
+                <Text style={styles.bidLockExplain}>
+                  {isTightGame
+                    ? 'More bids than tricks available — someone has to fall short.'
+                    : 'Fewer bids than tricks — spare tricks are up for grabs.'}
+                </Text>
+              </View>
+            </Animated.View>
+          )}
         </View>
       </View>
     </SafeAreaView>
+  );
+}
+
+function ConfigStepper({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  onChange: (delta: number) => void;
+}) {
+  return (
+    <View style={styles.configRow}>
+      <View style={styles.configRowMeta}>
+        <Text style={styles.configRowLabel}>{label}</Text>
+        <Text style={styles.configRowMax}>max {max}</Text>
+      </View>
+      <View style={styles.stepper}>
+        <TouchableOpacity
+          style={[styles.stepperBtn, value <= 1 && styles.stepperBtnDisabled]}
+          onPress={() => onChange(-1)}
+          disabled={value <= 1}
+        >
+          <Text style={styles.stepperBtnText}>−</Text>
+        </TouchableOpacity>
+        <Text style={styles.stepperValue}>{value}</Text>
+        <TouchableOpacity
+          style={[styles.stepperBtn, value >= max && styles.stepperBtnDisabled]}
+          onPress={() => onChange(1)}
+          disabled={value >= max}
+        >
+          <Text style={styles.stepperBtnText}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -732,8 +1014,9 @@ const styles = StyleSheet.create({
 
   // === LOBBY ===
   lobbyWrap: {
-    flex: 1,
+    flexGrow: 1,
     padding: 24,
+    paddingTop: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -742,6 +1025,7 @@ const styles = StyleSheet.create({
     top: 12,
     left: 16,
     padding: 8,
+    zIndex: 10,
   },
   backBtnText: {
     color: COLORS.textSecondary,
@@ -1382,5 +1666,281 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 12,
     marginTop: 20,
+  },
+
+  // === VARIATION SELECTOR (LOBBY) ===
+  variationSection: {
+    width: '100%',
+    marginBottom: 20,
+  },
+  variationLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 2,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  variationGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  variationOption: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: COLORS.surfaceGlass,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  variationOptionSelected: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(212,175,55,0.12)',
+  },
+  variationName: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  variationNameSelected: {
+    color: COLORS.goldLight,
+  },
+  variationDesc: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  variationReadonly: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+    backgroundColor: COLORS.surfaceGlass,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  configRows: {
+    marginTop: 10,
+    gap: 8,
+  },
+  configRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: COLORS.surfaceGlass,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  configRowMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  configRowLabel: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  configRowMax: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 1,
+  },
+  configReadonlyText: {
+    color: COLORS.goldLight,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stepperBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+    backgroundColor: 'rgba(212,175,55,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnDisabled: {
+    opacity: 0.35,
+  },
+  stepperBtnText: {
+    color: COLORS.goldLight,
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 26,
+  },
+  stepperValue: {
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: '800',
+    minWidth: 28,
+    textAlign: 'center',
+  },
+
+  // === TRUMP SELECTION ===
+  trumpOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(6, 14, 9, 0.82)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  trumpPanel: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+    backgroundColor: 'rgba(10, 28, 19, 0.96)',
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  trumpTitle: {
+    color: COLORS.goldLight,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  trumpSubtitle: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  trumpHandRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 4,
+    marginBottom: 16,
+  },
+  suitGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  suitButton: {
+    width: 76,
+    height: 76,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suitButtonSymbol: {
+    fontSize: 30,
+    lineHeight: 34,
+  },
+  suitButtonLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+    marginTop: 2,
+  },
+  blindDrawButton: {
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: COLORS.goldLight,
+  },
+  blindDrawText: {
+    color: COLORS.goldLight,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  trumpWaitText: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  trumpRevealBanner: {
+    position: 'absolute',
+    top: 110,
+    left: 30,
+    right: 30,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(10, 28, 19, 0.94)',
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+  },
+  trumpRevealText: {
+    color: COLORS.goldLight,
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+
+  // === BID LOCK CONFIRMATION ===
+  bidLockOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(6, 14, 9, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  bidLockPanel: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+    backgroundColor: 'rgba(10, 28, 19, 0.96)',
+    padding: 24,
+    alignItems: 'center',
+  },
+  bidLockTitle: {
+    color: COLORS.goldLight,
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  bidLockTotal: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  bidLockVerdict: {
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  bidLockExplain: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 17,
   },
 });

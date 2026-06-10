@@ -1,0 +1,194 @@
+<h2>Final Design v2 — Actual Design Tokens</h2>
+<p class="subtitle">Same layout as approved, now rendered with the real app colors, card component sizes, and typography.</p>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; }
+
+  .center { display:flex; gap:32px; justify-content:center; flex-wrap:wrap; margin:24px 0; }
+  .phone-wrap { display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .phone-label { font-size:12px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:#a0a0b0; text-align:center; }
+  .phone { width:260px; height:500px; background:#0A1C13; border-radius:28px; border:2px solid #2a2f2c; overflow:hidden; position:relative; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+
+  .status-bar { background:#0A1C13; padding:6px 10px; display:flex; gap:4px; flex-wrap:wrap; }
+  .pill { background:rgba(255,255,255,0.05); color:#A1A1AA; font-size:7px; padding:3px 7px; border-radius:999px; border:1px solid rgba(255,255,255,0.1); }
+  .table-bg { flex:1; background:radial-gradient(circle at center, #1A4B33 0%, #0A1C13 100%); height:80px; }
+
+  /* Modal */
+  .modal-overlay { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(3,10,7,0.78); display:flex; align-items:center; justify-content:center; padding:16px; }
+  .modal { background:#0F2B1D; border-radius:24px; border:1px solid rgba(243,229,171,0.3); padding:18px; width:100%; max-width:240px; box-shadow:0 0 40px rgba(0,0,0,0.5); }
+
+  /* Hand section */
+  .section-label { color:#A1A1AA; font-size:8px; font-weight:800; letter-spacing:1.4px; text-transform:uppercase; margin-bottom:6px; }
+
+  /* Card — small size (32×46) matching app's CARD_SIZES.small */
+  .card-small { width:32px; height:46px; background:#FAFAFA; border-radius:7px; border:1px solid rgba(255,255,255,0.55); box-shadow:0 3px 8px rgba(0,0,0,0.26); display:flex; flex-direction:column; justify-content:space-between; padding:3px 4px; flex-shrink:0; }
+  .card-rank { font-size:10px; font-weight:900; line-height:1.1; }
+  .card-suit-sm { font-size:10px; font-weight:800; line-height:1; }
+  .card-center { text-align:center; font-size:14px; font-weight:900; line-height:1; margin:auto 0; }
+  .card-bottom { transform:rotate(180deg); display:flex; flex-direction:column; align-items:flex-start; }
+  .red { color:#E63946; }
+  .blk { color:#1A1A1A; }
+
+  /* Card — trick size (44×62) for small hands */
+  .card-trick { width:40px; height:56px; background:#FAFAFA; border-radius:8px; border:1px solid rgba(255,255,255,0.55); box-shadow:0 3px 8px rgba(0,0,0,0.26); display:flex; flex-direction:column; justify-content:space-between; padding:3px 4px; flex-shrink:0; }
+
+  .card-row { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:10px; }
+  .card-grid-2row { display:grid; grid-template-columns:repeat(9,1fr); gap:2px; margin-bottom:10px; }
+
+  .divider { height:1px; background:rgba(255,255,255,0.1); margin-bottom:10px; }
+
+  /* Header */
+  .kicker { color:#D4AF37; font-size:8px; font-weight:800; letter-spacing:2.2px; text-transform:uppercase; margin-bottom:4px; }
+  .modal-title { color:#F3E5AB; font-size:16px; font-weight:900; margin-bottom:4px; }
+
+  /* Meta chips */
+  .meta-row { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:10px; }
+  .meta-chip { padding:3px 8px; border-radius:999px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); }
+  .meta-chip-text { color:#A1A1AA; font-size:8px; font-weight:700; }
+  .meta-chip-text.gold { color:#D4AF37; }
+
+  /* Swipe row */
+  .swipe-wrap { position:relative; overflow:hidden; margin-bottom:4px; }
+  .swipe-row { display:flex; gap:6px; }
+  .num-chip { min-width:38px; height:38px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.1); color:#fff; font-size:13px; font-weight:800; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .num-chip.sel { background:#D4AF37; color:#000; border-color:#D4AF37; box-shadow:0 0 12px rgba(212,175,55,0.4); }
+  .num-chip.restricted { background:rgba(239,68,68,0.14); border-color:rgba(239,68,68,0.3); color:rgba(239,68,68,0.65); font-size:10px; }
+  .fade-r { position:absolute; right:0; top:0; bottom:0; width:32px; background:linear-gradient(to right,transparent,#0F2B1D); pointer-events:none; }
+  .swipe-hint { font-size:8px; color:#D4AF37; text-align:right; margin-bottom:10px; opacity:0.75; }
+
+  /* Confirm */
+  .confirm-btn { background:#D4AF37; padding:10px; border-radius:28px; text-align:center; box-shadow:0 0 18px rgba(212,175,55,0.45); }
+  .confirm-text { color:#000; font-size:12px; font-weight:900; letter-spacing:0.6px; }
+
+  /* Removed: selected panel (42px number) — replaced by gold chip in swipe row */
+
+  .change-note { background:#0d1a14; border:1px solid rgba(239,68,68,0.2); border-radius:8px; padding:8px 14px; font-size:11px; color:#888; line-height:1.6; max-width:680px; margin:0 auto 16px; }
+  .change-note b { color:#e57373; }
+  .change-note .ok { color:#10B981; }
+  .token-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; max-width:680px; margin:0 auto; }
+  .token-card { background:#0d1a14; border:1px solid #1e3028; border-radius:8px; padding:10px 14px; font-size:11px; color:#888; line-height:1.6; }
+  .token-card h4 { font-size:11px; color:#6fcf97; margin-bottom:5px; }
+  .token-card code { font-family:monospace; font-size:10px; background:#0a1a10; padding:1px 4px; border-radius:3px; color:#aaa; }
+</style>
+
+<div class="center">
+
+  <!-- 5 cards (≤9 → single row, trick-size cards) -->
+  <div class="phone-wrap">
+    <div class="phone-label">5 cards · single row</div>
+    <div class="phone">
+      <div class="status-bar"><span class="pill">♠ Spades</span><span class="pill">Round 3/7</span><span class="pill">5 cards</span></div>
+      <div class="table-bg"></div>
+      <div class="modal-overlay">
+        <div class="modal">
+          <div class="section-label">Your hand</div>
+          <div class="card-row">
+            <div class="card-trick"><div class="card-rank red">A</div><div class="card-center red">♥</div><div class="card-bottom"><div class="card-rank red">A</div></div></div>
+            <div class="card-trick"><div class="card-rank blk">K</div><div class="card-center blk">♠</div><div class="card-bottom"><div class="card-rank blk">K</div></div></div>
+            <div class="card-trick"><div class="card-rank red">7</div><div class="card-center red">♦</div><div class="card-bottom"><div class="card-rank red">7</div></div></div>
+            <div class="card-trick"><div class="card-rank blk">J</div><div class="card-center blk">♣</div><div class="card-bottom"><div class="card-rank blk">J</div></div></div>
+            <div class="card-trick"><div class="card-rank blk">3</div><div class="card-center blk">♠</div><div class="card-bottom"><div class="card-rank blk">3</div></div></div>
+          </div>
+          <div class="divider"></div>
+          <div class="kicker">Bidding Round</div>
+          <div class="modal-title">Choose your exact number</div>
+          <div class="meta-row">
+            <div class="meta-chip"><span class="meta-chip-text">Round 3/7</span></div>
+            <div class="meta-chip"><span class="meta-chip-text">5 cards</span></div>
+            <div class="meta-chip"><span class="meta-chip-text gold">♠ spades</span></div>
+          </div>
+          <div class="swipe-wrap">
+            <div class="swipe-row">
+              <div class="num-chip">0</div>
+              <div class="num-chip sel">2</div>
+              <div class="num-chip">3</div>
+              <div class="num-chip restricted">4✕</div>
+              <div class="num-chip">5</div>
+            </div>
+          </div>
+          <div style="font-size:8px;color:#A1A1AA;text-align:center;margin-bottom:10px;">4 restricted · dealer rule</div>
+          <div class="confirm-btn"><div class="confirm-text">Lock in 2</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 17 cards (>9 → 2-row grid, small-size cards) -->
+  <div class="phone-wrap">
+    <div class="phone-label">17 cards · 2-row grid</div>
+    <div class="phone">
+      <div class="status-bar"><span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span></div>
+      <div class="table-bg"></div>
+      <div class="modal-overlay">
+        <div class="modal">
+          <div class="section-label">Your hand — 17 cards</div>
+          <div class="card-grid-2row">
+            <div class="card-small"><div class="card-rank red">A</div><div class="card-center red">♥</div><div class="card-bottom"><div class="card-rank red">A</div></div></div>
+            <div class="card-small"><div class="card-rank blk">K</div><div class="card-center blk">♠</div><div class="card-bottom"><div class="card-rank blk">K</div></div></div>
+            <div class="card-small"><div class="card-rank red">Q</div><div class="card-center red">♦</div><div class="card-bottom"><div class="card-rank red">Q</div></div></div>
+            <div class="card-small"><div class="card-rank blk">J</div><div class="card-center blk">♣</div><div class="card-bottom"><div class="card-rank blk">J</div></div></div>
+            <div class="card-small"><div class="card-rank blk">10</div><div class="card-center blk">♠</div><div class="card-bottom"><div class="card-rank blk">10</div></div></div>
+            <div class="card-small"><div class="card-rank red">9</div><div class="card-center red">♥</div><div class="card-bottom"><div class="card-rank red">9</div></div></div>
+            <div class="card-small"><div class="card-rank blk">8</div><div class="card-center blk">♣</div><div class="card-bottom"><div class="card-rank blk">8</div></div></div>
+            <div class="card-small"><div class="card-rank red">7</div><div class="card-center red">♦</div><div class="card-bottom"><div class="card-rank red">7</div></div></div>
+            <div class="card-small"><div class="card-rank blk">7</div><div class="card-center blk">♠</div><div class="card-bottom"><div class="card-rank blk">7</div></div></div>
+            <div class="card-small"><div class="card-rank red">6</div><div class="card-center red">♥</div><div class="card-bottom"><div class="card-rank red">6</div></div></div>
+            <div class="card-small"><div class="card-rank blk">5</div><div class="card-center blk">♣</div><div class="card-bottom"><div class="card-rank blk">5</div></div></div>
+            <div class="card-small"><div class="card-rank red">4</div><div class="card-center red">♦</div><div class="card-bottom"><div class="card-rank red">4</div></div></div>
+            <div class="card-small"><div class="card-rank blk">4</div><div class="card-center blk">♠</div><div class="card-bottom"><div class="card-rank blk">4</div></div></div>
+            <div class="card-small"><div class="card-rank red">3</div><div class="card-center red">♥</div><div class="card-bottom"><div class="card-rank red">3</div></div></div>
+            <div class="card-small"><div class="card-rank blk">3</div><div class="card-center blk">♣</div><div class="card-bottom"><div class="card-rank blk">3</div></div></div>
+            <div class="card-small"><div class="card-rank red">2</div><div class="card-center red">♦</div><div class="card-bottom"><div class="card-rank red">2</div></div></div>
+            <div class="card-small"><div class="card-rank blk">2</div><div class="card-center blk">♠</div><div class="card-bottom"><div class="card-rank blk">2</div></div></div>
+          </div>
+          <div class="divider"></div>
+          <div class="kicker">Bidding Round</div>
+          <div class="modal-title">Choose your exact number</div>
+          <div class="meta-row">
+            <div class="meta-chip"><span class="meta-chip-text">Round 1/17</span></div>
+            <div class="meta-chip"><span class="meta-chip-text">17 cards</span></div>
+            <div class="meta-chip"><span class="meta-chip-text gold">♠ spades</span></div>
+          </div>
+          <div class="swipe-wrap">
+            <div class="swipe-row">
+              <div class="num-chip">0</div>
+              <div class="num-chip">1</div>
+              <div class="num-chip">2</div>
+              <div class="num-chip sel">3</div>
+              <div class="num-chip">4</div>
+              <div class="num-chip restricted">6✕</div>
+              <div class="num-chip">7</div>
+            </div>
+            <div class="fade-r"></div>
+          </div>
+          <div class="swipe-hint">swipe for 8–17 →</div>
+          <div class="confirm-btn"><div class="confirm-text">Lock in 3</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="change-note">
+  <b>One structural change from earlier mockup:</b> The "Selected bid" panel (large 42px gold number) has been removed. The gold chip in the swipe row makes it obvious which number is selected — keeping both would make the modal too tall on smaller phones. The haptic feedback on selection still fires to confirm the choice. <span class="ok">Everything else is identical to the approved design.</span>
+</div>
+
+<div class="token-grid">
+  <div class="token-card"><h4>Colors — exact tokens from theme.ts</h4>
+    Modal bg: <code>#0F2B1D</code> (COLORS.surfaceSolid)<br/>
+    Modal border: <code>rgba(243,229,171,0.3)</code> (COLORS.borderAccent)<br/>
+    Chip selected: <code>#D4AF37</code> (COLORS.gold)<br/>
+    Chip restricted: <code>rgba(239,68,68,0.14)</code> bg<br/>
+    Section label: <code>#A1A1AA</code> (COLORS.textSecondary)<br/>
+    Kicker: <code>#D4AF37</code> (COLORS.gold)
+  </div>
+  <div class="token-card"><h4>PlayingCard component — existing sizes</h4>
+    ≤9 cards: <code>size="trick"</code> → 44×62px<br/>
+    10–17 cards: <code>size="small"</code> → 32×46px<br/>
+    Cards are non-interactive: <code>disabled={true}</code>, no <code>onPress</code><br/>
+    No highlighted/dimmed state — plain display only<br/>
+    Reuses existing <code>PlayingCard</code> component as-is
+  </div>
+</div>

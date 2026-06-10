@@ -1,0 +1,258 @@
+<h2>17 Cards — How Does the Hand Render?</h2>
+<p class="subtitle">3 players → floor(52/3) = 17 cards in round 1. The hand dock needs to handle this gracefully across all three approaches.</p>
+
+<style>
+  .phones { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin: 24px 0; }
+  .phone-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .phone-label { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #a0a0b0; }
+  .phone { width: 230px; height: 440px; background: #0a0f0c; border-radius: 28px; border: 2px solid #2a2f2c; overflow: hidden; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+
+  .status-bar { background: #111810; padding: 5px 10px; display: flex; gap: 4px; flex-wrap: wrap; flex-shrink:0; }
+  .pill { background: #1e2a22; color: #6fcf97; font-size: 7px; padding: 2px 5px; border-radius: 10px; border: 1px solid #2e4a38; }
+  .opponents { padding: 5px 8px; display: flex; justify-content: space-around; flex-shrink:0; }
+  .opp { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .opp-avatar { width: 26px; height: 26px; border-radius: 50%; background: #1e2a22; border: 1px solid #3a4a3a; display: flex; align-items: center; justify-content: center; font-size: 9px; color:#aaa; }
+  .opp-name { font-size: 7px; color: #666; }
+  .opp-badge { font-size: 7px; background: #1e3028; color: #6fcf97; padding: 1px 4px; border-radius: 6px; }
+
+  /* Standard card */
+  .card-sm { width: 22px; height: 32px; background: white; border-radius: 3px; border: 1px solid #ddd; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; padding: 1px 2px; font-size: 7px; font-weight: 700; color: #c0392b; box-shadow: 0 1px 3px rgba(0,0,0,0.4); flex-shrink:0; }
+  .card-sm.black { color: #1a1a2e; }
+  .card-sm.gold { border-color: #c9a227; box-shadow: 0 0 5px rgba(201,162,39,0.5); }
+
+  /* Small compact card */
+  .card-xs { width: 16px; height: 23px; background: white; border-radius: 2px; border: 1px solid #ccc; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; padding: 1px 2px; font-size: 6px; font-weight: 700; color: #c0392b; box-shadow: 0 1px 3px rgba(0,0,0,0.3); flex-shrink:0; }
+  .card-xs.black { color: #1a1a2e; }
+
+  /* Bottom sheet */
+  .sheet-backdrop { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.25); }
+  .bottom-sheet { position: absolute; bottom: 0; left: 0; right: 0; background: #0d1f16; border-top-left-radius: 16px; border-top-right-radius: 16px; border-top: 1px solid #2a4a3a; padding: 8px 8px 12px; }
+  .sheet-handle { width: 24px; height: 3px; background: #2e4a38; border-radius: 2px; margin: 0 auto 6px; }
+  .bid-title { font-size: 9px; color: #6fcf97; font-weight: 600; margin-bottom: 2px; text-align: center; }
+  .bid-meta { font-size: 7px; color: #557a66; text-align: center; margin-bottom: 5px; }
+  .bid-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; margin-bottom: 5px; }
+  .bid-btn { background: #1a2a22; border: 1px solid #2e4a38; color: #ccc; font-size: 8px; font-weight: 700; border-radius: 5px; height: 22px; display: flex; align-items: center; justify-content: center; }
+  .bid-btn.sel { background: #c9a227; color: #0a0f0c; border-color: #c9a227; }
+  .bid-btn.restricted { background: #3a1515; border-color: #6b2323; color: #e57373; font-size: 7px; }
+  .bid-confirm { background: #c9a227; color: #0a0f0c; font-size: 9px; font-weight: 700; border-radius: 6px; padding: 5px; text-align: center; }
+
+  .turn-banner { background: #0f2a1a; border: 1px solid #1e4a2a; border-radius: 6px; margin: 2px 8px; padding: 4px 8px; text-align: center; flex-shrink:0; }
+  .turn-text { font-size: 8px; color: #6fcf97; font-weight: 600; }
+
+  /* Scroll indicator */
+  .scroll-arrow { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: rgba(201,162,39,0.3); color: #c9a227; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+  .scroll-fade { position: absolute; right: 0; top: 0; bottom: 0; width: 30px; background: linear-gradient(to right, transparent, #0a0f0c); border-radius: 0 3px 3px 0; }
+
+  /* Fan layout */
+  .fan-container { position: relative; height: 52px; margin: 0 auto; width: 100%; }
+  .fan-card { position: absolute; width: 20px; height: 30px; background: white; border-radius: 2px; border: 1px solid #ccc; font-size: 6px; font-weight: 700; padding: 1px 2px; box-shadow: 0 1px 4px rgba(0,0,0,0.4); color: #c0392b; transform-origin: bottom center; }
+  .fan-card.black { color: #1a1a2e; }
+
+  /* Compact grid in modal */
+  .modal-backdrop { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(3,10,7,0.85); display: flex; align-items: center; justify-content: center; }
+  .modal-box { background: #0d1f16; border-radius: 14px; border: 1px solid #2a4a3a; padding: 8px; width: 200px; }
+  .mini-label { font-size: 6px; color: #557a66; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; }
+  .card-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; margin-bottom: 6px; }
+  .modal-divider { height: 1px; background: #1e3028; margin-bottom: 6px; }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 600; margin-bottom: 4px; }
+  .tag-prob { background: #3a1515; color: #e57373; border: 1px solid #5a2525; }
+  .tag-sol { background: #0e3020; color: #6fcf97; border: 1px solid #1e5038; }
+  .tag-rec { background: #1a1a0e; color: #d4c44a; border: 1px solid #3a3a1e; }
+
+  .note-box { background: #0d1a14; border: 1px solid #1e3028; border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-size: 11px; color: #888; line-height: 1.6; max-width: 700px; margin-left: auto; margin-right: auto; }
+  .note-box b { color: #aaa; }
+</style>
+
+<!-- PROBLEM ILLUSTRATION -->
+<div class="note-box">
+  <b>The problem:</b> With 17 cards, the horizontal scroll hand dock shows ~5–6 cards at a time. To bid intelligently, you need to see all 17. Scrolling defeats the purpose — you'd need to scrub back and forth just to assess your hand.
+</div>
+
+<div class="phones">
+
+  <!-- PROBLEM: Current scroll (5–6 visible) -->
+  <div class="phone-wrap">
+    <div class="phone-label">Problem — Scroll cuts off hand</div>
+    <div class="phone">
+      <div class="status-bar">
+        <span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span>
+      </div>
+      <div class="opponents">
+        <div class="opp"><div class="opp-avatar">P</div><div class="opp-name">Priya</div><div class="opp-badge">bid 5</div></div>
+        <div class="opp"><div class="opp-avatar">R</div><div class="opp-name">Rahul</div><div class="opp-badge">waiting</div></div>
+      </div>
+      <div class="turn-banner"><div class="turn-text">Your turn to bid · 17 cards</div></div>
+      <!-- Hand with overflow -->
+      <div style="padding: 4px 8px 0; flex:1; display:flex; flex-direction:column; justify-content:flex-end; padding-bottom:8px; position:relative;">
+        <div style="font-size:7px;color:#557a66;margin-bottom:2px;">Your hand (scroll to see all)</div>
+        <div style="display:flex;gap:4px;overflow:hidden;position:relative;">
+          <div class="card-sm">A<br/>♥</div>
+          <div class="card-sm black">K<br/>♠</div>
+          <div class="card-sm">Q<br/>♦</div>
+          <div class="card-sm black">J<br/>♣</div>
+          <div class="card-sm black">10<br/>♠</div>
+          <div class="card-sm">9<br/>♥</div>
+          <!-- rest hidden -->
+          <div class="scroll-fade"></div>
+        </div>
+        <div style="font-size:7px;color:#c9a227;margin-top:2px;text-align:right;">+11 more → scroll</div>
+      </div>
+      <div class="sheet-backdrop"></div>
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="bid-title">How many tricks?</div>
+        <div class="bid-meta">Spades trump · 17 cards · long bid grid...</div>
+        <div class="bid-grid">
+          <div class="bid-btn">0</div><div class="bid-btn">1</div><div class="bid-btn">2</div>
+          <div class="bid-btn sel">3</div><div class="bid-btn">4</div><div class="bid-btn">5</div>
+        </div>
+        <div style="font-size:7px;color:#557a66;text-align:center;margin-bottom:4px;">scroll bid grid for 6–17 →</div>
+        <div class="bid-confirm">Lock in 3</div>
+      </div>
+    </div>
+    <div style="max-width:230px;font-size:11px;color:#888;line-height:1.5;text-align:center;">
+      <span class="tag tag-prob">Problem</span><br/>
+      Only ~5–6 cards visible. Must scroll to assess hand. Bid grid itself also overflows.
+    </div>
+  </div>
+
+  <!-- SOLUTION 1: Compact overlapping cards + scrollable bid row -->
+  <div class="phone-wrap">
+    <div class="phone-label">Fix A — Overlap + Compact cards</div>
+    <div class="phone">
+      <div class="status-bar">
+        <span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span>
+      </div>
+      <div class="opponents">
+        <div class="opp"><div class="opp-avatar">P</div><div class="opp-name">Priya</div><div class="opp-badge">bid 5</div></div>
+        <div class="opp"><div class="opp-avatar">R</div><div class="opp-name">Rahul</div><div class="opp-badge">waiting</div></div>
+      </div>
+      <div class="turn-banner"><div class="turn-text">Your turn to bid · 17 cards</div></div>
+      <div style="padding: 4px 8px; flex:1; display:flex; flex-direction:column; justify-content:flex-end; padding-bottom:8px;">
+        <div style="font-size:7px;color:#557a66;margin-bottom:3px;">Your hand — all 17</div>
+        <!-- overlapping compact cards, all 17 visible -->
+        <div style="display:flex;position:relative;height:34px;padding-left:2px;">
+          <!-- 17 cards overlapping, each offset ~11px -->
+          <div class="card-xs" style="position:absolute;left:0px;z-index:17">A<br/>♥</div>
+          <div class="card-xs black" style="position:absolute;left:11px;z-index:16">K<br/>♠</div>
+          <div class="card-xs" style="position:absolute;left:22px;z-index:15">Q<br/>♦</div>
+          <div class="card-xs black" style="position:absolute;left:33px;z-index:14">J<br/>♣</div>
+          <div class="card-xs black" style="position:absolute;left:44px;z-index:13">10<br/>♠</div>
+          <div class="card-xs" style="position:absolute;left:55px;z-index:12">9<br/>♥</div>
+          <div class="card-xs black" style="position:absolute;left:66px;z-index:11">8<br/>♣</div>
+          <div class="card-xs" style="position:absolute;left:77px;z-index:10">7<br/>♦</div>
+          <div class="card-xs black" style="position:absolute;left:88px;z-index:9">7<br/>♠</div>
+          <div class="card-xs" style="position:absolute;left:99px;z-index:8">6<br/>♥</div>
+          <div class="card-xs black" style="position:absolute;left:110px;z-index:7">5<br/>♣</div>
+          <div class="card-xs" style="position:absolute;left:121px;z-index:6">4<br/>♦</div>
+          <div class="card-xs black" style="position:absolute;left:132px;z-index:5">4<br/>♠</div>
+          <div class="card-xs" style="position:absolute;left:143px;z-index:4">3<br/>♥</div>
+          <div class="card-xs black" style="position:absolute;left:154px;z-index:3">3<br/>♣</div>
+          <div class="card-xs" style="position:absolute;left:165px;z-index:2">2<br/>♦</div>
+          <div class="card-xs black" style="position:absolute;left:176px;z-index:1">2<br/>♠</div>
+        </div>
+      </div>
+      <div class="sheet-backdrop"></div>
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="bid-title">How many tricks?</div>
+        <div class="bid-meta">Spades trump · 17 cards</div>
+        <!-- Scrollable number row instead of grid -->
+        <div style="overflow:hidden;position:relative;margin-bottom:5px;">
+          <div style="display:flex;gap:3px;overflow:hidden;">
+            <div class="bid-btn" style="min-width:22px;font-size:7px;">0</div>
+            <div class="bid-btn" style="min-width:22px;font-size:7px;">1</div>
+            <div class="bid-btn" style="min-width:22px;font-size:7px;">2</div>
+            <div class="bid-btn sel" style="min-width:22px;font-size:7px;">3</div>
+            <div class="bid-btn" style="min-width:22px;font-size:7px;">4</div>
+            <div class="bid-btn" style="min-width:22px;font-size:7px;">5</div>
+            <div class="bid-btn" style="min-width:22px;font-size:7px;">6</div>
+            <div class="bid-btn" style="min-width:22px;font-size:7px;">7</div>
+            <div class="scroll-fade"></div>
+          </div>
+          <div style="font-size:6px;color:#c9a227;margin-top:1px;text-align:right;">→ scroll for 8–17</div>
+        </div>
+        <div class="bid-confirm">Lock in 3</div>
+      </div>
+    </div>
+    <div style="max-width:230px;font-size:11px;color:#888;line-height:1.5;text-align:center;">
+      <span class="tag tag-sol">Option 1</span><br/>
+      Cards <b>overlap</b> like a real hand — all 17 rank/suit labels visible. Bid numbers scroll horizontally (single row). Small code change.
+    </div>
+  </div>
+
+  <!-- SOLUTION 2: Cards in modal grid -->
+  <div class="phone-wrap">
+    <div class="phone-label">Fix B — Card grid in modal</div>
+    <div class="phone">
+      <div class="status-bar">
+        <span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span>
+      </div>
+      <div class="opponents">
+        <div class="opp"><div class="opp-avatar">P</div><div class="opp-name">Priya</div><div class="opp-badge">bid 5</div></div>
+        <div class="opp"><div class="opp-avatar">R</div><div class="opp-name">Rahul</div><div class="opp-badge">waiting</div></div>
+      </div>
+      <!-- Dark modal with card grid inside -->
+      <div class="modal-backdrop">
+        <div class="modal-box">
+          <div class="mini-label">Your hand — 17 cards</div>
+          <div class="card-grid">
+            <div class="card-xs">A<br/>♥</div>
+            <div class="card-xs black">K<br/>♠</div>
+            <div class="card-xs">Q<br/>♦</div>
+            <div class="card-xs black">J<br/>♣</div>
+            <div class="card-xs black">10<br/>♠</div>
+            <div class="card-xs">9<br/>♥</div>
+            <div class="card-xs black">8<br/>♣</div>
+            <div class="card-xs">7<br/>♦</div>
+            <div class="card-xs black">7<br/>♠</div>
+            <div class="card-xs">6<br/>♥</div>
+            <div class="card-xs black">5<br/>♣</div>
+            <div class="card-xs">4<br/>♦</div>
+            <div class="card-xs black">4<br/>♠</div>
+            <div class="card-xs">3<br/>♥</div>
+            <div class="card-xs black">3<br/>♣</div>
+            <div class="card-xs">2<br/>♦</div>
+            <div class="card-xs black">2<br/>♠</div>
+          </div>
+          <div class="modal-divider"></div>
+          <div class="bid-title">How many tricks?</div>
+          <div class="bid-meta">Spades trump · Bid ≠ dealer's balance</div>
+          <div class="bid-grid">
+            <div class="bid-btn">0</div><div class="bid-btn">1</div><div class="bid-btn">2</div>
+            <div class="bid-btn sel">3</div><div class="bid-btn">4</div><div class="bid-btn">5</div>
+          </div>
+          <div style="font-size:6px;color:#557a66;text-align:center;margin-bottom:4px;">scroll for 6–17</div>
+          <div class="bid-confirm">Lock in 3</div>
+        </div>
+      </div>
+    </div>
+    <div style="max-width:230px;font-size:11px;color:#888;line-height:1.5;text-align:center;">
+      <span class="tag tag-rec">Option 2</span><br/>
+      Modal shows cards in a <b>2-row grid</b> — all 17 visible at once. Compact but legible. Bid numbers scroll in the same modal.
+    </div>
+  </div>
+
+</div>
+
+<div class="note-box" style="margin-top:0;">
+  <b>Key trade-off:</b> Option 1 (overlap) keeps the game table visible and feels like holding a real hand. Option 2 (grid in modal) is self-contained and guarantees all cards are seen before picking a bid — but hides the table. Both handle the bid number overflow with a horizontal scroll row.
+</div>
+
+<div class="options" style="max-width:700px;margin:0 auto;">
+  <div class="option" data-choice="overlap" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Overlapping hand + scrollable bid row</h3>
+      <p>Cards displayed like a real hand (overlapping, smaller). All 17 rank/suit labels visible. Bid numbers in a single scrollable row. Game table still visible in background.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="grid" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Card grid inside the modal</h3>
+      <p>All 17 cards shown in a 2-row grid at the top of the bidding modal. Compact and complete. Table is hidden but the decision is self-contained. Scrollable bid number row below.</p>
+    </div>
+  </div>
+</div>

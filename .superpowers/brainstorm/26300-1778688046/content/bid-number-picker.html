@@ -1,0 +1,209 @@
+<h2>Bid Number Picker — Interaction Style</h2>
+<p class="subtitle">17 cards = bids 0–17 (18 options). How should the number selection feel on a phone?</p>
+
+<style>
+  .phones { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin: 24px 0; }
+  .phone-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .phone-label { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #a0a0b0; text-align:center; }
+  .phone { width: 220px; height: 420px; background: #0a0f0c; border-radius: 28px; border: 2px solid #2a2f2c; overflow: hidden; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+
+  .modal-full { position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(3,10,7,0.85); display:flex; align-items:center; justify-content:center; }
+  .modal-box { background:#0d1f16; border-radius:14px; border:1px solid #2a4a3a; padding:10px; width:196px; }
+  .mini-label { font-size:6px; color:#557a66; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px; }
+  .card-grid { display:grid; grid-template-columns:repeat(9,1fr); gap:2px; margin-bottom:7px; }
+  .card-xs { width:16px; height:23px; background:white; border-radius:2px; border:1px solid #ccc; display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-start; padding:1px 2px; font-size:6px; font-weight:700; color:#c0392b; box-shadow:0 1px 2px rgba(0,0,0,0.3); }
+  .card-xs.black { color:#1a1a2e; }
+  .divider { height:1px; background:#1e3028; margin-bottom:7px; }
+  .bid-title { font-size:9px; color:#6fcf97; font-weight:600; text-align:center; margin-bottom:2px; }
+  .bid-meta { font-size:7px; color:#557a66; text-align:center; margin-bottom:7px; }
+  .confirm-btn { background:#c9a227; color:#0a0f0c; font-size:9px; font-weight:700; border-radius:6px; padding:6px; text-align:center; margin-top:6px; }
+
+  /* OPTION 1: Swipe scroll row */
+  .scroll-track { overflow:hidden; position:relative; margin-bottom:5px; }
+  .scroll-row { display:flex; gap:5px; }
+  .num-chip { min-width:28px; height:28px; background:#1a2a22; border:1px solid #2e4a38; color:#ccc; font-size:10px; font-weight:700; border-radius:6px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .num-chip.sel { background:#c9a227; color:#0a0f0c; border-color:#c9a227; box-shadow:0 0 8px rgba(201,162,39,0.4); }
+  .num-chip.restricted { background:#3a1515; border-color:#6b2323; color:#e57373; }
+  .fade-r { position:absolute; right:0; top:0; bottom:0; width:28px; background:linear-gradient(to right,transparent,#0d1f16); pointer-events:none; }
+  .swipe-hint { font-size:7px; color:#c9a227; text-align:right; margin-top:2px; }
+
+  /* OPTION 2: Stepper */
+  .stepper { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:5px; }
+  .step-btn { width:36px; height:36px; background:#1a2a22; border:1px solid #2e4a38; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:20px; color:#6fcf97; font-weight:300; }
+  .step-num { width:52px; height:52px; background:#0f2a1a; border:1px solid #1e5038; border-radius:14px; display:flex; align-items:center; justify-content:center; flex-direction:column; }
+  .step-val { font-size:28px; font-weight:700; color:#c9a227; line-height:1; }
+  .step-sub { font-size:7px; color:#557a66; }
+  .restrict-tag { background:#3a1515; color:#e57373; font-size:7px; border-radius:5px; padding:2px 6px; text-align:center; margin-bottom:5px; }
+
+  /* OPTION 3: Drum roll picker */
+  .drum-container { position:relative; height:72px; overflow:hidden; margin-bottom:5px; }
+  .drum-track { display:flex; flex-direction:column; align-items:center; gap:0; transform:translateY(-28px); }
+  .drum-item { height:24px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; color:#3a5a48; width:100%; transition:transform 0.2s; }
+  .drum-item.near { color:#6a9a80; font-size:12px; }
+  .drum-item.active { color:#c9a227; font-size:16px; font-weight:700; }
+  .drum-highlight { position:absolute; left:20%; right:20%; top:50%; transform:translateY(-50%); height:24px; background:rgba(201,162,39,0.08); border-top:1px solid rgba(201,162,39,0.25); border-bottom:1px solid rgba(201,162,39,0.25); border-radius:4px; pointer-events:none; }
+  .drum-fade-t { position:absolute; top:0; left:0; right:0; height:24px; background:linear-gradient(to bottom,#0d1f16,transparent); }
+  .drum-fade-b { position:absolute; bottom:0; left:0; right:0; height:24px; background:linear-gradient(to top,#0d1f16,transparent); }
+
+  .tag { display:inline-block; padding:2px 8px; border-radius:10px; font-size:9px; font-weight:600; margin-bottom:4px; }
+  .tag-rec { background:#0e3020; color:#6fcf97; border:1px solid #1e5038; }
+  .tag-alt { background:#1a1a2e; color:#8888cc; border:1px solid #2a2a4e; }
+
+  .status-bar { background:#111810; padding:5px 10px; display:flex; gap:4px; flex-wrap:wrap; flex-shrink:0; }
+  .pill { background:#1e2a22; color:#6fcf97; font-size:7px; padding:2px 5px; border-radius:10px; border:1px solid #2e4a38; }
+  .top-stub { background:#0a0f0c; padding:8px; flex:1; }
+</style>
+
+<div class="phones">
+
+  <!-- OPTION 1: Swipe scroll row -->
+  <div class="phone-wrap">
+    <div class="phone-label">Option 1<br/>Swipe row</div>
+    <div class="phone">
+      <div class="status-bar"><span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span></div>
+      <div class="top-stub"></div>
+      <div class="modal-full">
+        <div class="modal-box">
+          <div class="mini-label">Your hand — 17 cards</div>
+          <div class="card-grid">
+            <div class="card-xs">A<br/>♥</div><div class="card-xs black">K<br/>♠</div><div class="card-xs">Q<br/>♦</div>
+            <div class="card-xs black">J<br/>♣</div><div class="card-xs black">10<br/>♠</div><div class="card-xs">9<br/>♥</div>
+            <div class="card-xs black">8<br/>♣</div><div class="card-xs">7<br/>♦</div><div class="card-xs black">7<br/>♠</div>
+            <div class="card-xs">6<br/>♥</div><div class="card-xs black">5<br/>♣</div><div class="card-xs">4<br/>♦</div>
+            <div class="card-xs black">4<br/>♠</div><div class="card-xs">3<br/>♥</div><div class="card-xs black">3<br/>♣</div>
+            <div class="card-xs">2<br/>♦</div><div class="card-xs black">2<br/>♠</div>
+          </div>
+          <div class="divider"></div>
+          <div class="bid-title">How many tricks?</div>
+          <div class="bid-meta">Spades trump · Bid ≠ 6 (dealer)</div>
+          <div class="scroll-track">
+            <div class="scroll-row">
+              <div class="num-chip">0</div>
+              <div class="num-chip">1</div>
+              <div class="num-chip">2</div>
+              <div class="num-chip sel">3</div>
+              <div class="num-chip">4</div>
+              <div class="num-chip">5</div>
+              <div class="num-chip restricted">6</div>
+              <div class="num-chip">7</div>
+            </div>
+            <div class="fade-r"></div>
+          </div>
+          <div class="swipe-hint">← swipe for 8–17 →</div>
+          <div class="confirm-btn">Lock in 3</div>
+        </div>
+      </div>
+    </div>
+    <div style="max-width:220px;font-size:11px;color:#888;line-height:1.5;text-align:center;">
+      <span class="tag tag-alt">Option 1</span><br/>
+      Numbers in a flat row, <b>swipe left/right</b> to reveal more. Familiar to anyone who has used a horizontal scroll. Restricted bid stays visible with red tint. Simple to build.
+    </div>
+  </div>
+
+  <!-- OPTION 2: Stepper -->
+  <div class="phone-wrap">
+    <div class="phone-label">Option 2<br/>– / + Stepper</div>
+    <div class="phone">
+      <div class="status-bar"><span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span></div>
+      <div class="top-stub"></div>
+      <div class="modal-full">
+        <div class="modal-box">
+          <div class="mini-label">Your hand — 17 cards</div>
+          <div class="card-grid">
+            <div class="card-xs">A<br/>♥</div><div class="card-xs black">K<br/>♠</div><div class="card-xs">Q<br/>♦</div>
+            <div class="card-xs black">J<br/>♣</div><div class="card-xs black">10<br/>♠</div><div class="card-xs">9<br/>♥</div>
+            <div class="card-xs black">8<br/>♣</div><div class="card-xs">7<br/>♦</div><div class="card-xs black">7<br/>♠</div>
+            <div class="card-xs">6<br/>♥</div><div class="card-xs black">5<br/>♣</div><div class="card-xs">4<br/>♦</div>
+            <div class="card-xs black">4<br/>♠</div><div class="card-xs">3<br/>♥</div><div class="card-xs black">3<br/>♣</div>
+            <div class="card-xs">2<br/>♦</div><div class="card-xs black">2<br/>♠</div>
+          </div>
+          <div class="divider"></div>
+          <div class="bid-title">How many tricks?</div>
+          <div class="bid-meta">Spades trump · Bid ≠ 6 (dealer restriction)</div>
+          <div class="restrict-tag">⚠ 6 is restricted for dealer</div>
+          <div class="stepper">
+            <div class="step-btn">−</div>
+            <div class="step-num">
+              <div class="step-val">3</div>
+              <div class="step-sub">tricks</div>
+            </div>
+            <div class="step-btn">+</div>
+          </div>
+          <div class="confirm-btn">Lock in 3</div>
+        </div>
+      </div>
+    </div>
+    <div style="max-width:220px;font-size:11px;color:#888;line-height:1.5;text-align:center;">
+      <span class="tag tag-rec">Recommended</span><br/>
+      <b>Tap − / +</b> to change the number. No overflow — works for 0–17, 0–5, any count. Restricted bid is skipped automatically (jumps from 5 → 7). Large tap targets, thumb-friendly.
+    </div>
+  </div>
+
+  <!-- OPTION 3: Drum roll picker -->
+  <div class="phone-wrap">
+    <div class="phone-label">Option 3<br/>Drum roll</div>
+    <div class="phone">
+      <div class="status-bar"><span class="pill">♠ Spades</span><span class="pill">Round 1/17</span><span class="pill">17 cards</span></div>
+      <div class="top-stub"></div>
+      <div class="modal-full">
+        <div class="modal-box">
+          <div class="mini-label">Your hand — 17 cards</div>
+          <div class="card-grid">
+            <div class="card-xs">A<br/>♥</div><div class="card-xs black">K<br/>♠</div><div class="card-xs">Q<br/>♦</div>
+            <div class="card-xs black">J<br/>♣</div><div class="card-xs black">10<br/>♠</div><div class="card-xs">9<br/>♥</div>
+            <div class="card-xs black">8<br/>♣</div><div class="card-xs">7<br/>♦</div><div class="card-xs black">7<br/>♠</div>
+            <div class="card-xs">6<br/>♥</div><div class="card-xs black">5<br/>♣</div><div class="card-xs">4<br/>♦</div>
+            <div class="card-xs black">4<br/>♠</div><div class="card-xs">3<br/>♥</div><div class="card-xs black">3<br/>♣</div>
+            <div class="card-xs">2<br/>♦</div><div class="card-xs black">2<br/>♠</div>
+          </div>
+          <div class="divider"></div>
+          <div class="bid-title">How many tricks?</div>
+          <div class="bid-meta">Spades trump · Drag to pick · Bid ≠ 6</div>
+          <div class="drum-container">
+            <div class="drum-track">
+              <div class="drum-item">1</div>
+              <div class="drum-item near">2</div>
+              <div class="drum-item active">3</div>
+              <div class="drum-item near">4</div>
+              <div class="drum-item">5</div>
+            </div>
+            <div class="drum-highlight"></div>
+            <div class="drum-fade-t"></div>
+            <div class="drum-fade-b"></div>
+          </div>
+          <div style="font-size:7px;color:#557a66;text-align:center;margin-bottom:5px;">drag up/down to change · 6 is skipped (restricted)</div>
+          <div class="confirm-btn">Lock in 3</div>
+        </div>
+      </div>
+    </div>
+    <div style="max-width:220px;font-size:11px;color:#888;line-height:1.5;text-align:center;">
+      <span class="tag tag-alt">Option 3</span><br/>
+      <b>Scroll/drag vertically</b> like an iOS picker wheel. Feels very native. Numbers fade in/out above and below. Hardest to build — needs a custom scroll snap component.
+    </div>
+  </div>
+
+</div>
+
+<div class="options" style="max-width:700px;margin:0 auto;">
+  <div class="option" data-choice="swipe-row" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Swipe row</h3>
+      <p>Numbers in a flat scrollable row. Swipe left to see higher numbers. Familiar, simple to build. Restricted bid visible as red chip.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="stepper" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>– / + Stepper (Recommended)</h3>
+      <p>Tap minus or plus to change the number. No overflow ever. Restricted bid is auto-skipped. Large thumb targets. Works identically for 5-card and 17-card rounds.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="drum" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>Drum roll picker</h3>
+      <p>Drag vertically like an iOS wheel. Most native-feeling on mobile. Restricted bid is skipped mid-scroll. Most complex to implement.</p>
+    </div>
+  </div>
+</div>

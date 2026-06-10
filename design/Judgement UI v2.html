@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Judgement – UI v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800;900&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@700;900&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: #04080a;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* Layout: sidebar + phone centered */
+  #layout {
+    display: flex; align-items: center; gap: 32px;
+    max-width: 680px; width: 100%;
+    padding: 0 16px;
+  }
+
+  /* Screen picker sidebar */
+  #sidebar {
+    display: flex; flex-direction: column; gap: 5px;
+    flex-shrink: 0;
+  }
+  .side-label {
+    color: rgba(255,255,255,0.22); font-size: 10px; font-weight: 700;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    margin-bottom: 4px; padding-left: 4px;
+  }
+  .side-tab {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px; padding: 8px 14px;
+    color: rgba(255,255,255,0.38);
+    font-size: 11px; font-weight: 700;
+    cursor: pointer; white-space: nowrap;
+    text-align: left; width: 100%;
+    transition: all 0.18s; font-family: 'DM Sans', sans-serif;
+  }
+  .side-tab:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
+  .side-tab.active {
+    background: rgba(212,175,55,0.13);
+    border-color: rgba(212,175,55,0.32);
+    color: #F3E5AB;
+  }
+
+  /* Phone bezel */
+  .phone-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .phone-meta { color: rgba(255,255,255,0.22); font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+  .phone {
+    width: 390px; height: 790px;
+    border-radius: 46px;
+    border: 1.5px solid rgba(255,255,255,0.07);
+    box-shadow:
+      0 0 0 8px #080e0a,
+      0 0 0 9.5px rgba(255,255,255,0.045),
+      0 44px 90px rgba(0,0,0,0.75);
+    overflow: hidden;
+    position: relative;
+    display: flex; flex-direction: column;
+  }
+  /* Dynamic island */
+  .dyn-island {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    width: 118px; height: 34px;
+    background: #000; border-radius: 20px; z-index: 200;
+  }
+  /* Status bar */
+  .status-bar {
+    height: 50px; flex-shrink: 0;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 28px 9px;
+    font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.78);
+    position: relative; z-index: 10;
+  }
+  /* Main content */
+  .screen-wrap { flex: 1; overflow: hidden; position: relative; }
+  .screen-inner {
+    position: absolute; inset: 0;
+    overflow-y: auto; overflow-x: hidden;
+  }
+  .screen-inner::-webkit-scrollbar { width: 2px; }
+  .screen-inner::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+  /* Bottom home indicator */
+  .home-indicator {
+    height: 30px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: inherit;
+  }
+  .home-bar {
+    width: 120px; height: 4px; border-radius: 3px;
+    background: rgba(255,255,255,0.22);
+  }
+
+  /* Keyframe animations */
+  @keyframes vfloat0 { 0%,100%{ transform:translateY(0) }    50%{ transform:translateY(-10px) } }
+  @keyframes vfloat1 { 0%,100%{ transform:translateY(-4px) } 50%{ transform:translateY(6px)  } }
+  @keyframes glowDrift {
+    0%,100%{ opacity:.85; transform:scale(0.95) }
+    50%{ opacity:1; transform:scale(1.05) }
+  }
+  @keyframes bannerPulse {
+    0%,100%{ box-shadow:0 0 0 0 rgba(212,175,55,0.28) }
+    50%{ box-shadow:0 0 0 7px rgba(212,175,55,0) }
+  }
+  @keyframes fadeSlideUp {
+    from{ opacity:0; transform:translateY(10px) }
+    to{ opacity:1; transform:translateY(0) }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="card-v2.jsx"></script>
+<script type="text/babel" src="screens-v2.jsx"></script>
+<script type="text/babel" src="game-v2.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "theme": "green",
+  "cardStyle": "pips",
+  "animIntensity": "high",
+  "tableLayout": "arc",
+  "typography": "balanced"
+}/*EDITMODE-END*/;
+
+const SCREENS = [
+  { id:'home',         label:'🏠 Home',          note:'Landing + join'   },
+  { id:'lobby',        label:'🚪 Lobby',          note:'Room + players'   },
+  { id:'game-bidding', label:'🎯 Bid Phase',       note:'Tap to open bid'  },
+  { id:'game-playing', label:'🃏 Play Phase',      note:'Click cards'      },
+  { id:'roundend',     label:'📊 Round End',       note:'Scores recap'     },
+  { id:'gameover',     label:'🏆 Game Over',       note:'Final standings'  },
+  { id:'howtoplay',    label:'📖 How to Play',     note:'Rules reference'  },
+];
+
+const THEME_GRAD = {
+  green:  'radial-gradient(ellipse at 50% 18%, #1A4B33 0%, #0A1C13 62%)',
+  blue:   'radial-gradient(ellipse at 50% 18%, #0F3348 0%, #091824 62%)',
+  purple: 'radial-gradient(ellipse at 50% 18%, #2A1250 0%, #120A22 62%)',
+};
+const THEME_BG = { green:'#060e09', blue:'#040910', purple:'#060410' };
+
+function App() {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [screen, setScreen] = React.useState('home');
+
+  const theme   = tweaks?.theme        || 'green';
+  const cardSt  = tweaks?.cardStyle    || 'pips';
+  const anim    = tweaks?.animIntensity || 'high';
+  const tLayout = tweaks?.tableLayout  || 'arc';
+  const typo    = tweaks?.typography   || 'balanced';
+
+  // Apply body bg and typography CSS override
+  React.useEffect(() => {
+    document.body.style.background = THEME_BG[theme] || THEME_BG.green;
+  }, [theme]);
+
+  React.useEffect(() => {
+    let el = document.getElementById('__typo');
+    if (!el) { el = document.createElement('style'); el.id = '__typo'; document.head.appendChild(el); }
+    el.textContent = {
+      tight:    '.outfit-hero { letter-spacing: 0.03em !important; } p, span { letter-spacing: 0.01em; }',
+      airy:     '.outfit-hero { font-weight: 700 !important; letter-spacing: 0.12em !important; } p { line-height: 1.8; }',
+      balanced: '',
+    }[typo] || '';
+  }, [typo]);
+
+  const now = new Date();
+  const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+
+  function renderScreen() {
+    const t = { cardStyle:cardSt, animIntensity:anim, tableLayout:tLayout, typography:typo };
+    switch(screen) {
+      case 'home':         return <HomeScreenV2        onNavigate={setScreen} tweaks={t} />;
+      case 'lobby':        return <LobbyScreenV2       onNavigate={setScreen} tweaks={t} />;
+      case 'game-bidding': return <GameScreenV2        onNavigate={setScreen} tweaks={t} phase="bidding" />;
+      case 'game-playing': return <GameScreenV2        onNavigate={setScreen} tweaks={t} phase="playing" />;
+      case 'roundend':     return <RoundEndScreenV2    onNavigate={setScreen} tweaks={t} />;
+      case 'gameover':     return <GameOverScreenV2    onNavigate={setScreen} tweaks={t} />;
+      case 'howtoplay':    return <HowToPlayScreenV2   onNavigate={setScreen} tweaks={t} />;
+      default:             return <HomeScreenV2        onNavigate={setScreen} tweaks={t} />;
+    }
+  }
+
+  return (
+    <div id="layout">
+      {/* Sidebar */}
+      <nav id="sidebar">
+        <p className="side-label">Screens</p>
+        {SCREENS.map(s => (
+          <button key={s.id} className={`side-tab${screen===s.id?' active':''}`} onClick={() => setScreen(s.id)}>
+            {s.label}
+            <span style={{ display:'block', color:'rgba(255,255,255,0.28)', fontSize:9, fontWeight:500, marginTop:2, letterSpacing:'0.04em' }}>{s.note}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* Phone */}
+      <div className="phone-wrap">
+        <span className="phone-meta">Judgement · iPhone 15 · v2</span>
+        <div className="phone" style={{ background: THEME_GRAD[theme] || THEME_GRAD.green }}>
+          <div className="dyn-island" />
+
+          <div className="status-bar">
+            <span style={{ fontFamily:'DM Sans, sans-serif' }}>{timeStr}</span>
+            <span style={{ opacity:.45, fontSize:10, letterSpacing:'0.06em' }}>JUDGEMENT</span>
+            <span style={{ fontSize:11, letterSpacing:2 }}>▐▐▐</span>
+          </div>
+
+          <div className="screen-wrap">
+            <div className="screen-inner">
+              {renderScreen()}
+            </div>
+          </div>
+
+          <div className="home-indicator">
+            <div className="home-bar" />
+          </div>
+        </div>
+        <span className="phone-meta" style={{ opacity:.45, fontSize:9 }}>
+          Click cards · Sidebar to switch · Tweaks panel to customize
+        </span>
+      </div>
+
+      {/* Tweaks panel */}
+      <TweaksPanel>
+        <TweakSection label="Color Theme" />
+        <TweakRadio id="theme" value={tweaks?.theme || 'green'} onChange={v => setTweak('theme', v)}
+          options={[
+            { label:'Casino Green', value:'green'  },
+            { label:'Midnight Blue', value:'blue'   },
+            { label:'Velvet Purple', value:'purple' },
+          ]} />
+
+        <TweakSection label="Card Style" />
+        <TweakRadio id="cardStyle" value={tweaks?.cardStyle || 'pips'} onChange={v => setTweak('cardStyle', v)}
+          options={[
+            { label:'Minimal',  value:'minimal' },
+            { label:'Pip Grid', value:'pips'    },
+            { label:'Foil',     value:'foil'    },
+          ]} />
+
+        <TweakSection label="Animation" />
+        <TweakRadio id="animIntensity" value={tweaks?.animIntensity || 'high'} onChange={v => setTweak('animIntensity', v)}
+          options={[
+            { label:'Subtle', value:'low'    },
+            { label:'Medium', value:'medium' },
+            { label:'Rich',   value:'high'   },
+          ]} />
+
+        <TweakSection label="Table Layout" />
+        <TweakRadio id="tableLayout" value={tweaks?.tableLayout || 'arc'} onChange={v => setTweak('tableLayout', v)}
+          options={[
+            { label:'Arc',     value:'arc'     },
+            { label:'Compact', value:'compact' },
+          ]} />
+
+        <TweakSection label="Typography" />
+        <TweakRadio id="typography" value={tweaks?.typography || 'balanced'} onChange={v => setTweak('typography', v)}
+          options={[
+            { label:'Balanced', value:'balanced' },
+            { label:'Tight',    value:'tight'    },
+            { label:'Airy',     value:'airy'     },
+          ]} />
+      </TweaksPanel>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

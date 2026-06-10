@@ -23,6 +23,27 @@ def shuffle_and_deal(num_players: int, cards_per_player: int) -> List[List[Dict]
     return hands
 
 
+def sort_hand(hand: List[Dict]) -> None:
+    hand.sort(key=lambda c: (SUITS.index(c['suit']), RANK_VALUES[c['rank']]))
+
+
+def shuffle_and_deal_partial(num_players: int, cards_per_player: int, batch_size: int) -> Tuple[List[List[Dict]], List[Dict]]:
+    """Returns (partial_hands, remaining_deck) where each hand has batch_size cards.
+
+    The remaining deck holds the un-dealt cards; the second batch
+    (cards_per_player - batch_size per player) is dealt from it later.
+    """
+    deck = create_deck()
+    random.shuffle(deck)
+    hands = []
+    for i in range(num_players):
+        hand = deck[i * batch_size:(i + 1) * batch_size]
+        sort_hand(hand)
+        hands.append(hand)
+    remaining = deck[num_players * batch_size:]
+    return hands, remaining
+
+
 def get_trump_suit(round_number: int) -> str:
     return TRUMP_ORDER[(round_number - 1) % 4]
 

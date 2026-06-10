@@ -1,0 +1,8 @@
+{"type":"server-started","port":61966,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:61966","screen_dir":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/content","state_dir":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/state"}
+{"type":"screen-added","file":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/content/bidding-approaches.html"}
+{"type":"screen-added","file":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/content/17-cards-problem.html"}
+{"type":"screen-added","file":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/content/bid-number-picker.html"}
+{"type":"screen-added","file":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/content/final-design.html"}
+{"type":"screen-added","file":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/content/final-design-v2.html"}
+{"type":"screen-added","file":"/Users/varunmalani/Desktop/Projects/judgement_app/.superpowers/brainstorm/26300-1778688046/content/final-design-v3.html"}
+{"type":"server-stopped","reason":"owner process exited"}

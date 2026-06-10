@@ -1,0 +1,238 @@
+<h2>Bidding Phase — Card Visibility</h2>
+<p class="subtitle">The current modal covers the hand with a dark backdrop. Three approaches to fix this — pick the one that feels right for the game.</p>
+
+<style>
+  .phones { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; margin: 24px 0; }
+  .phone-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .phone-label { font-size: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #a0a0b0; }
+  .phone { width: 220px; height: 420px; background: #0a0f0c; border-radius: 28px; border: 2px solid #2a2f2c; overflow: hidden; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+
+  /* Shared game elements */
+  .status-bar { background: #111810; padding: 6px 10px; display: flex; gap: 5px; flex-wrap: wrap; }
+  .pill { background: #1e2a22; color: #6fcf97; font-size: 8px; padding: 2px 6px; border-radius: 10px; border: 1px solid #2e4a38; }
+  .opponents { padding: 8px; display: flex; justify-content: space-around; }
+  .opp { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .opp-avatar { width: 28px; height: 28px; border-radius: 50%; background: #1e2a22; border: 1px solid #3a4a3a; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+  .opp-name { font-size: 7px; color: #888; }
+  .opp-badge { font-size: 7px; background: #1e3028; color: #6fcf97; padding: 1px 4px; border-radius: 6px; }
+  .trick-area { margin: 4px 8px; background: #0e1a12; border-radius: 10px; border: 1px solid #1e2e22; padding: 8px; text-align: center; }
+  .trick-label { font-size: 8px; color: #555; margin-bottom: 3px; }
+  .trick-hint { font-size: 9px; color: #4a8a6a; }
+  .hand-row { display: flex; gap: 4px; padding: 6px 8px; justify-content: center; }
+  .card-sm { width: 26px; height: 38px; background: white; border-radius: 4px; border: 1px solid #ddd; display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; padding: 2px 3px; font-size: 8px; font-weight: 700; color: #c0392b; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+  .card-sm.black { color: #1a1a2e; }
+  .card-sm.gold-glow { border-color: #f5c842; box-shadow: 0 0 6px rgba(245,200,66,0.6); }
+
+  /* APPROACH A — Bottom sheet */
+  .sheet-backdrop { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.2); }
+  .bottom-sheet { position: absolute; bottom: 0; left: 0; right: 0; background: #0d1f16; border-top-left-radius: 16px; border-top-right-radius: 16px; border-top: 1px solid #2a4a3a; padding: 10px 10px 14px; }
+  .sheet-handle { width: 28px; height: 3px; background: #2e4a38; border-radius: 2px; margin: 0 auto 8px; }
+  .bid-title { font-size: 10px; color: #6fcf97; font-weight: 600; margin-bottom: 3px; text-align: center; }
+  .bid-meta { font-size: 8px; color: #666; text-align: center; margin-bottom: 6px; }
+  .bid-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 6px; }
+  .bid-btn { background: #1a2a22; border: 1px solid #2e4a38; color: #ddd; font-size: 10px; font-weight: 700; border-radius: 6px; height: 28px; display: flex; align-items: center; justify-content: center; }
+  .bid-btn.sel { background: #c9a227; color: #0a0f0c; border-color: #c9a227; }
+  .bid-btn.restricted { background: #3a1515; border-color: #6b2323; color: #e57373; }
+  .bid-confirm { background: #c9a227; color: #0a0f0c; font-size: 10px; font-weight: 700; border-radius: 8px; padding: 6px; text-align: center; }
+
+  /* APPROACH B — Cards in modal */
+  .modal-backdrop2 { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(3,10,7,0.82); display: flex; align-items: center; justify-content: center; }
+  .modal-box { background: #0d1f16; border-radius: 14px; border: 1px solid #2a4a3a; padding: 10px; width: 190px; }
+  .modal-hand-label { font-size: 7px; color: #557a66; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .modal-hand-row { display: flex; gap: 3px; margin-bottom: 8px; overflow: hidden; }
+  .modal-divider { height: 1px; background: #1e3028; margin-bottom: 8px; }
+
+  /* APPROACH C — Split screen */
+  .split-top { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+  .split-hand { background: #0d1f16; border-top: 1px solid #1e3028; padding: 6px 8px 4px; }
+  .split-bid-bar { background: #0a1a10; border-top: 1px solid #2e4a38; padding: 6px 8px; }
+  .split-label { font-size: 7px; color: #557a66; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .split-bid-row { display: flex; gap: 3px; justify-content: center; }
+  .split-bid-btn { background: #1a2a22; border: 1px solid #2e4a38; color: #ddd; font-size: 9px; font-weight: 700; border-radius: 5px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+  .split-bid-btn.sel { background: #c9a227; color: #0a0f0c; border-color: #c9a227; }
+  .split-bid-btn.restricted { background: #3a1515; border-color: #6b2323; color: #e57373; }
+  .split-confirm { background: #c9a227; color: #0a0f0c; font-size: 9px; font-weight: 700; border-radius: 6px; padding: 5px; text-align: center; margin-top: 4px; }
+  .turn-banner { background: #0f2a1a; border: 1px solid #1e4a2a; border-radius: 6px; margin: 4px 8px; padding: 5px 8px; text-align: center; }
+  .turn-text { font-size: 8px; color: #6fcf97; font-weight: 600; }
+  .turn-sub { font-size: 7px; color: #557a66; }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 600; margin-bottom: 6px; }
+  .tag-rec { background: #0e3020; color: #6fcf97; border: 1px solid #1e5038; }
+  .tag-alt { background: #1a1a2e; color: #8888cc; border: 1px solid #2a2a4e; }
+</style>
+
+<div class="phones">
+
+  <!-- APPROACH A: Bottom Sheet -->
+  <div class="phone-wrap">
+    <div class="phone-label">A — Bottom Sheet</div>
+    <div class="phone">
+      <div class="status-bar">
+        <span class="pill">♠ Spades trump</span>
+        <span class="pill">Round 2/7</span>
+        <span class="pill">5 cards</span>
+      </div>
+      <div class="opponents">
+        <div class="opp"><div class="opp-avatar">P</div><div class="opp-name">Priya</div><div class="opp-badge">bid 2</div></div>
+        <div class="opp"><div class="opp-avatar">R</div><div class="opp-name">Rahul</div><div class="opp-badge">waiting</div></div>
+        <div class="opp"><div class="opp-avatar">S</div><div class="opp-name">Sneha</div><div class="opp-badge">waiting</div></div>
+      </div>
+      <div class="trick-area">
+        <div class="trick-label">Bids being placed</div>
+        <div class="trick-hint">Your turn to bid</div>
+      </div>
+      <!-- Hand visible in background above sheet -->
+      <div style="padding: 4px 8px 0; flex:1; display:flex; flex-direction:column; justify-content:flex-end;">
+        <div style="font-size:7px; color:#557a66; margin-bottom:2px; padding-left:2px;">Your hand</div>
+        <div class="hand-row">
+          <div class="card-sm">A<br/>♥</div>
+          <div class="card-sm black">K<br/>♠</div>
+          <div class="card-sm">7<br/>♦</div>
+          <div class="card-sm black">J<br/>♣</div>
+          <div class="card-sm black">3<br/>♠</div>
+        </div>
+      </div>
+      <!-- Bottom sheet overlays partially -->
+      <div class="sheet-backdrop"></div>
+      <div class="bottom-sheet">
+        <div class="sheet-handle"></div>
+        <div class="bid-title">How many tricks will you take?</div>
+        <div class="bid-meta">♠ Spades trump · 5 cards this round</div>
+        <div class="bid-grid">
+          <div class="bid-btn">0</div>
+          <div class="bid-btn">1</div>
+          <div class="bid-btn sel">2</div>
+          <div class="bid-btn">3</div>
+          <div class="bid-btn restricted">4</div>
+          <div class="bid-btn">5</div>
+        </div>
+        <div class="bid-confirm">Lock in 2</div>
+      </div>
+    </div>
+    <div style="max-width:220px; font-size:11px; color:#888; line-height:1.5; text-align:center;">
+      <span class="tag tag-rec">Recommended</span><br/>
+      Modal becomes a <b>bottom drawer</b>. Cards stay visible above the sheet. Light backdrop so game context isn't lost. Sheet only covers ~55% of screen height.
+    </div>
+  </div>
+
+  <!-- APPROACH B: Cards inside modal -->
+  <div class="phone-wrap">
+    <div class="phone-label">B — Cards in Modal</div>
+    <div class="phone">
+      <div class="status-bar">
+        <span class="pill">♠ Spades trump</span>
+        <span class="pill">Round 2/7</span>
+        <span class="pill">5 cards</span>
+      </div>
+      <div class="opponents">
+        <div class="opp"><div class="opp-avatar">P</div><div class="opp-name">Priya</div><div class="opp-badge">bid 2</div></div>
+        <div class="opp"><div class="opp-avatar">R</div><div class="opp-name">Rahul</div><div class="opp-badge">waiting</div></div>
+        <div class="opp"><div class="opp-avatar">S</div><div class="opp-name">Sneha</div><div class="opp-badge">waiting</div></div>
+      </div>
+      <!-- Dark modal over everything -->
+      <div class="modal-backdrop2">
+        <div class="modal-box">
+          <div class="modal-hand-label">Your hand</div>
+          <div class="modal-hand-row">
+            <div class="card-sm gold-glow">A<br/>♥</div>
+            <div class="card-sm black">K<br/>♠</div>
+            <div class="card-sm">7<br/>♦</div>
+            <div class="card-sm black">J<br/>♣</div>
+            <div class="card-sm black">3<br/>♠</div>
+          </div>
+          <div class="modal-divider"></div>
+          <div class="bid-title">How many tricks?</div>
+          <div class="bid-meta">Spades trump · 5 cards · Bid ≠ 4</div>
+          <div class="bid-grid">
+            <div class="bid-btn">0</div>
+            <div class="bid-btn">1</div>
+            <div class="bid-btn sel">2</div>
+            <div class="bid-btn">3</div>
+            <div class="bid-btn restricted">4</div>
+            <div class="bid-btn">5</div>
+          </div>
+          <div style="margin-top:6px;"></div>
+          <div class="bid-confirm">Lock in 2</div>
+        </div>
+      </div>
+    </div>
+    <div style="max-width:220px; font-size:11px; color:#888; line-height:1.5; text-align:center;">
+      <span class="tag tag-alt">Alternative</span><br/>
+      Modal stays full-screen but <b>includes your hand</b> at the top as a read-only reference strip. Keeps focus on the decision. No layout change needed.
+    </div>
+  </div>
+
+  <!-- APPROACH C: Split screen, no modal -->
+  <div class="phone-wrap">
+    <div class="phone-label">C — No Modal / Split</div>
+    <div class="phone" style="flex-direction:column;">
+      <div class="status-bar">
+        <span class="pill">♠ Spades trump</span>
+        <span class="pill">Round 2/7</span>
+        <span class="pill">5 cards</span>
+      </div>
+      <div class="split-top">
+        <div class="opponents">
+          <div class="opp"><div class="opp-avatar">P</div><div class="opp-name">Priya</div><div class="opp-badge">bid 2</div></div>
+          <div class="opp"><div class="opp-avatar">R</div><div class="opp-name">Rahul</div><div class="opp-badge">waiting</div></div>
+          <div class="opp"><div class="opp-avatar">S</div><div class="opp-name">Sneha</div><div class="opp-badge">waiting</div></div>
+        </div>
+        <div class="turn-banner">
+          <div class="turn-text">Your turn to bid</div>
+          <div class="turn-sub">Look at your hand, then pick a number</div>
+        </div>
+      </div>
+      <div class="split-hand">
+        <div class="split-label">Your hand</div>
+        <div class="hand-row">
+          <div class="card-sm gold-glow">A<br/>♥</div>
+          <div class="card-sm black">K<br/>♠</div>
+          <div class="card-sm">7<br/>♦</div>
+          <div class="card-sm black">J<br/>♣</div>
+          <div class="card-sm black">3<br/>♠</div>
+        </div>
+      </div>
+      <div class="split-bid-bar">
+        <div class="split-label">How many tricks will you take? · Bid ≠ 4</div>
+        <div class="split-bid-row">
+          <div class="split-bid-btn">0</div>
+          <div class="split-bid-btn">1</div>
+          <div class="split-bid-btn sel">2</div>
+          <div class="split-bid-btn">3</div>
+          <div class="split-bid-btn restricted">4</div>
+          <div class="split-bid-btn">5</div>
+        </div>
+        <div class="split-confirm">Lock in 2</div>
+      </div>
+    </div>
+    <div style="max-width:220px; font-size:11px; color:#888; line-height:1.5; text-align:center;">
+      <span class="tag tag-alt">Alternative</span><br/>
+      <b>No modal</b> — the bidding UI is inline at the bottom of the screen. Hand and bid selector are always visible together. Cleanest, but biggest layout change.
+    </div>
+  </div>
+
+</div>
+
+<div class="options" style="max-width: 700px; margin: 0 auto;">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Bottom Sheet (Recommended)</h3>
+      <p>Sheet slides up from bottom, hand stays visible above it. Light backdrop preserves game context. Smallest code change — just swap Modal for a bottom sheet.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Cards Inside the Modal</h3>
+      <p>Modal stays center-screen but shows a read-only card strip at the top. No layout change. Works well if the table context doesn't matter much during bidding.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Inline / No Modal</h3>
+      <p>Remove the modal entirely. Bid selector lives inline at the bottom, hand above it. Most elegant long-term, but requires a more significant layout refactor of game.tsx.</p>
+    </div>
+  </div>
+</div>

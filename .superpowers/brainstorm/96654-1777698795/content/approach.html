@@ -1,0 +1,44 @@
+<h2>How should "How to Play" work?</h2>
+<p class="subtitle">Three approaches — pick the one that fits how new players will actually use this</p>
+
+<div class="options">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Richer static section (in-place)</h3>
+      <p>Expand the existing rulesBox into a multi-section card on the home screen — sections for Scoring, Trump, and Bidding with icons. Always visible, no interaction required.</p>
+      <div class="pros-cons" style="margin-top:10px">
+        <div class="pros"><h4>Pros</h4><ul><li>Zero friction — just scroll down</li><li>No new screen or state</li><li>Minimal code change</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Home screen gets longer</li><li>Can't show full rules depth</li><li>Veteran players always see it</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Expandable card (accordion)</h3>
+      <p>The current rulesBox becomes tappable — tap "How to Play" to expand it in-place with full rules (5–6 sections). Collapsed by default, so veterans aren't bothered.</p>
+      <div class="pros-cons" style="margin-top:10px">
+        <div class="pros"><h4>Pros</h4><ul><li>Progressive disclosure</li><li>Stays on home screen, no modal</li><li>Clean collapsed state</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Expands pushes buttons up/off-screen</li><li>Slightly more complex than static</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Modal / bottom sheet</h3>
+      <p>A "How to Play" link/button opens a full-screen modal with all rules organized by phase (Setup → Bidding → Playing → Scoring). Scrollable, dismissible with a close button.</p>
+      <div class="pros-cons" style="margin-top:10px">
+        <div class="pros"><h4>Pros</h4><ul><li>Unlimited space for rules depth</li><li>Home screen stays clean</li><li>Can include examples and scoring table</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Extra tap to access</li><li>More code (Modal component)</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:20px;font-size:12px">My recommendation: <strong>B (expandable)</strong> — home screen stays clean for veterans, new players get full rules without leaving the screen. Modal (C) is worth it only if the rules need more depth than an expandable allows.</p>

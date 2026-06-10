@@ -1,0 +1,287 @@
+// rn/components/BiddingModal.tsx
+// Redesigned bidding modal with giant number picker + hand grid preview.
+// Drop-in replacement for frontend/components/BiddingModal.tsx — same props.
+
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet,
+  Modal, Platform, AccessibilityInfo, ScrollView,
+} from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { COLORS, SUIT_SYMBOLS, CARD_SIZES, CardStyle } from '../utils/theme';
+import PlayingCard, { CardData } from './PlayingCard';
+
+interface BiddingModalProps {
+  visible: boolean;
+  yourHand: CardData[];
+  cardsThisRound: number;
+  trumpSuit: string;
+  currentRound: number;
+  totalRounds: number;
+  restrictedBids: number[];
+  onPlaceBid: (bid: number) => void;
+  cardStyle?: CardStyle;           // new — pass from your game state
+}
+
+export default function BiddingModal({
+  visible, yourHand, cardsThisRound, trumpSuit,
+  currentRound, totalRounds, restrictedBids, onPlaceBid,
+  cardStyle = 'minimal',
+}: BiddingModalProps) {
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [selectedBid, setSelectedBid]   = useState(0);
+
+  const bidOptions   = useMemo(() => Array.from({ length: cardsThisRound + 1 }, (_, i) => i), [cardsThisRound]);
+  const isRestricted = (b: number) => restrictedBids.includes(b);
+
+  const trumpSymbol = SUIT_SYMBOLS[trumpSuit] || '';
+  const trumpColor  = trumpSuit === 'hearts' || trumpSuit === 'diamonds' ? COLORS.suitRed : '#FFFFFF';
+
+  // Use smaller cards for large hands
+  const cardSize = yourHand.length > 8 ? 'small' : 'bid';
+
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    const first = bidOptions.find(b => !isRestricted(b)) ?? 0;
+    setSelectedBid(first);
+  }, [visible, bidOptions]);
+
+  const haptic = async (kind: 'selection' | 'medium') => {
+    try {
+      kind === 'selection'
+        ? await Haptics.selectionAsync()
+        : await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch { /* ignore */ }
+  };
+
+  const change = async (delta: number) => {
+    let next = selectedBid + delta;
+    while (next >= 0 && next <= cardsThisRound && isRestricted(next)) next += delta;
+    if (next >= 0 && next <= cardsThisRound && !isRestricted(next)) {
+      setSelectedBid(next);
+      await haptic('selection');
+    }
+  };
+
+  const handleDot = async (b: number) => {
+    if (isRestricted(b)) return;
+    setSelectedBid(b);
+    await haptic('selection');
+  };
+
+  const handleConfirm = async () => {
+    await haptic('medium');
+    onPlaceBid(selectedBid);
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType={reduceMotion ? 'none' : 'fade'}
+      statusBarTranslucent={Platform.OS === 'android'}
+    >
+      <View style={styles.overlay}>
+        <View style={styles.backdrop} />
+        <View style={styles.sheet}>
+
+          {/* ── Hand preview ─────────────────────────────── */}
+          <Text style={styles.sectionLabel}>
+            Your hand · {yourHand.length} cards
+          </Text>
+          <ScrollView
+            style={styles.handScroll}
+            contentContainerStyle={styles.handGrid}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+          >
+            {yourHand.map((c, i) => (
+              <PlayingCard
+                key={`${c.rank}-${c.suit}-${i}`}
+                card={c} size={cardSize} cardStyle={cardStyle} disabled
+              />
+            ))}
+          </ScrollView>
+
+          <View style={styles.divider} />
+
+          {/* ── Context chips ────────────────────────────── */}
+          <Text style={styles.kicker}>Bidding Round</Text>
+          <Text style={styles.title}>How many tricks will you win?</Text>
+          <View style={styles.chips}>
+            <MetaChip label={`Round ${currentRound}/${totalRounds}`} />
+            <MetaChip label={`${cardsThisRound} cards`} />
+            <MetaChip label={`${trumpSymbol} ${trumpSuit}`} color={trumpColor} />
+          </View>
+
+          {/* ── Giant number picker ──────────────────────── */}
+          <View style={styles.pickerRow}>
+            <TouchableOpacity
+              testID="bid-decrease"
+              style={styles.arrowBtn}
+              onPress={() => change(-1)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.arrowText}>−</Text>
+            </TouchableOpacity>
+
+            <View style={styles.numberWrap}>
+              <Text style={styles.bigNumber}>{selectedBid}</Text>
+              <Text style={styles.outOf}>out of {cardsThisRound}</Text>
+            </View>
+
+            <TouchableOpacity
+              testID="bid-increase"
+              style={styles.arrowBtn}
+              onPress={() => change(1)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.arrowText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Dot indicators ───────────────────────────── */}
+          <View style={styles.dotsRow}>
+            {bidOptions.map(b => (
+              <TouchableOpacity
+                key={b}
+                testID={`bid-dot-${b}`}
+                onPress={() => handleDot(b)}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              >
+                <View style={[
+                  styles.dot,
+                  { width: b === selectedBid ? 22 : 8 },
+                  b === selectedBid ? styles.dotActive
+                    : isRestricted(b) ? styles.dotRestricted
+                    : styles.dotInactive,
+                ]} />
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* ── Confirm ──────────────────────────────────── */}
+          <TouchableOpacity
+            testID="confirm-bid-button"
+            style={styles.confirmBtn}
+            onPress={handleConfirm}
+            activeOpacity={0.88}
+          >
+            <Text style={styles.confirmTxt}>Lock in {selectedBid} →</Text>
+          </TouchableOpacity>
+
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function MetaChip({ label, color }: { label: string; color?: string }) {
+  return (
+    <View style={styles.chip}>
+      <Text style={[styles.chipText, color ? { color } : undefined]}>{label}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  overlay: {
+    flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(2,8,5,0.90)',
+  },
+  sheet: {
+    width: '100%', maxWidth: 380,
+    backgroundColor: '#0C2218',
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.28)',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 26,
+    shadowColor: '#000',
+    shadowOpacity: 0.6,
+    shadowRadius: 32,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 18,
+  },
+
+  // Hand section
+  sectionLabel: {
+    color: COLORS.textSecondary, fontSize: 10, fontWeight: '800',
+    letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 8,
+  },
+  handScroll: { maxHeight: 136 },
+  handGrid: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    gap: 5, justifyContent: 'center', paddingTop: 4, paddingBottom: 8,
+  },
+
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginVertical: 16 },
+
+  // Header
+  kicker: {
+    color: COLORS.gold, fontSize: 10, fontWeight: '800',
+    letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4,
+  },
+  title: {
+    color: COLORS.goldLight, fontSize: 19, fontWeight: '900',
+    marginBottom: 12,
+  },
+
+  // Chips
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  chip: {
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+  },
+  chipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' },
+
+  // Number picker
+  pickerRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', gap: 20, marginBottom: 18,
+  },
+  arrowBtn: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  arrowText: { color: '#FFFFFF', fontSize: 28, fontWeight: '300', lineHeight: 32 },
+  numberWrap: { alignItems: 'center', minWidth: 110 },
+  bigNumber: {
+    color: COLORS.gold, fontSize: 84, fontWeight: '900',
+    lineHeight: 88,
+  },
+  outOf: { color: COLORS.textSecondary, fontSize: 12, marginTop: 2 },
+
+  // Dots
+  dotsRow: {
+    flexDirection: 'row', flexWrap: 'wrap',
+    justifyContent: 'center', gap: 5, marginBottom: 22,
+  },
+  dot: { height: 8, borderRadius: 4 },
+  dotActive:     { backgroundColor: COLORS.gold },
+  dotInactive:   { backgroundColor: 'rgba(255,255,255,0.22)' },
+  dotRestricted: { backgroundColor: 'rgba(239,68,68,0.45)' },
+
+  // Confirm
+  confirmBtn: {
+    backgroundColor: COLORS.gold,
+    paddingVertical: 15, borderRadius: 999,
+    alignItems: 'center',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.45, shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  confirmTxt: { color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
+});
