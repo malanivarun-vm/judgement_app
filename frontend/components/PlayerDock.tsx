@@ -2,11 +2,14 @@ import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing, interpolate } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing, interpolate, FadeInDown, FadeOutUp } from 'react-native-reanimated';
 import { theme } from '../utils/theme';
+import { TouchableOpacity } from 'react-native';
 
-export function PlayerDock({ name, score, bid, tricksWon, isYourTurn }:{
+export function PlayerDock({ name, score, bid, tricksWon, isYourTurn, onEmotePress, activeEmote }:{
   name:string; score:number; bid:number|null; tricksWon:number; isYourTurn:boolean;
+  onEmotePress?: () => void;
+  activeEmote?: { emoji: string, key: number } | null;
 }) {
   const sweep = useSharedValue(0);
   useEffect(() => {
@@ -30,14 +33,28 @@ export function PlayerDock({ name, score, bid, tricksWon, isYourTurn }:{
           />
         </Animated.View>
 
-        <LinearGradient colors={['#F2CB57','#8A6E1E']} style={styles.avatar}>
-          <Text style={styles.avatarText}>{name.charAt(0)}</Text>
-        </LinearGradient>
+        <View style={{ position: 'relative' }}>
+          <LinearGradient colors={['#F2CB57','#8A6E1E']} style={styles.avatar}>
+            <Text style={styles.avatarText}>{name.charAt(0)}</Text>
+          </LinearGradient>
+          {activeEmote && (
+            <Animated.View key={activeEmote.key} entering={FadeInDown.springify()} exiting={FadeOutUp} style={{position:'absolute', top:-24, right:-16, backgroundColor:'rgba(0,0,0,0.4)', borderRadius:20, padding:4, zIndex:99, borderWidth:1, borderColor:theme.border}}>
+              <Text style={{fontSize:24}}>{activeEmote.emoji}</Text>
+            </Animated.View>
+          )}
+        </View>
 
         <View style={{flex:1, minWidth:0}}>
           <View style={styles.row}>
             <Text style={styles.name}>{name}</Text>
-            {isYourTurn && <Text style={styles.turn}>YOUR TURN</Text>}
+            <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
+              {isYourTurn && <Text style={styles.turn}>YOUR TURN</Text>}
+              {onEmotePress && (
+                <TouchableOpacity onPress={onEmotePress} style={{backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4}}>
+                  <Text style={{fontSize: 14}}>😊</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
           <View style={[styles.row,{gap:8, marginTop:6}]}>
             <Stat label="Score" value={score} accent />

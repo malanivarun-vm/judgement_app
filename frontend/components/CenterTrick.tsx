@@ -44,7 +44,7 @@ export function CenterTrick({ cards }:{ cards: TrickCard[] }) {
 
 const styles = StyleSheet.create({
   wrap: { flex:1, alignItems:'center', justifyContent:'center' },
-  stage: { width: 260, height: 180, alignItems:'center', justifyContent:'center' },
+  stage: { width: '100%', height: '100%', minHeight: 180, alignItems:'center', justifyContent:'center' },
   empty: { color: 'rgba(245,241,230,0.4)', fontSize: 11, letterSpacing: 3, fontWeight:'600' },
   tag: { position:'absolute', top:-14, alignSelf:'center', zIndex:10, flexDirection:'row', alignItems:'center', gap:4, paddingHorizontal:8, paddingVertical:2, borderRadius:999, backgroundColor: theme.glassStrong, borderWidth:1 },
   tagText: { color: theme.ivory, fontSize: 10, fontWeight:'700' },

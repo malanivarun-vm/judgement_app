@@ -387,6 +387,21 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 if player and player['is_host']:
                     room.start_game()
 
+            elif action == 'send_emote':
+                emoji = data.get('emoji')
+                if emoji:
+                    payload = {
+                        "type": "emote",
+                        "player_id": player_id,
+                        "emoji": emoji
+                    }
+                    for pid, ws_conn in list(room.connections.items()):
+                        try:
+                            await ws_conn.send_json(payload)
+                        except:
+                            pass
+                continue
+
             await room.broadcast_state()
 
     except WebSocketDisconnect:

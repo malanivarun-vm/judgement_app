@@ -1,13 +1,14 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { BlurView } from 'expo-blur';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing, FadeInDown, FadeOutUp } from 'react-native-reanimated';
 import { theme } from '../utils/theme';
 
 export interface Opponent {
   id: string; name: string; score: number;
   bid: number | null; tricksWon: number;
   isActive: boolean; avatarHue: number; cardsLeft: number;
+  activeEmote?: { emoji: string, key: number } | null;
 }
 
 export function OpponentBadge({ o }:{ o: Opponent }) {
@@ -33,6 +34,11 @@ export function OpponentBadge({ o }:{ o: Opponent }) {
           <View style={styles.cardsBadge}>
             <Text style={styles.cardsBadgeText}>{o.cardsLeft}</Text>
           </View>
+          {o.activeEmote && (
+            <Animated.View key={o.activeEmote.key} entering={FadeInDown.springify()} exiting={FadeOutUp} style={{position:'absolute', top:-24, right:-16, backgroundColor:'rgba(0,0,0,0.4)', borderRadius:20, padding:4, zIndex:99, borderWidth:1, borderColor:theme.border}}>
+              <Text style={{fontSize:24}}>{o.activeEmote.emoji}</Text>
+            </Animated.View>
+          )}
         </View>
         <View style={{flex:1, minWidth:0}}>
           <View style={styles.row}>

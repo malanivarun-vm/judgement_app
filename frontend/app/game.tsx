@@ -17,7 +17,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
+import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS, theme } from '../utils/theme';
+import { audioService } from '../utils/audio';
 import Reanimated, { FadeIn } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -78,8 +79,12 @@ export default function GameScreen() {
 
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [connected, setConnected] = useState(false);
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [error, setError] = useState('');
   const [trickResult, setTrickResult] = useState<any>(null);
+  const [activeEmotes, setActiveEmotes] = useState<Record<string, {emoji:string, key:number}>>({});
+  const [showEmotePicker, setShowEmotePicker] = useState(false);
+  const EMOTES = ['😂', '😡', '😭', '🤯', '😎', '🎉', '🤡', '💀'];
   const [reduceMotion, setReduceMotion] = useState(false);
   const trickResultTimer = useRef<any>(null);
   const prevTrickRef = useRef<string>('');
@@ -89,17 +94,20 @@ export default function GameScreen() {
   const phaseAnim = useRef(new Animated.Value(1)).current;
   const errorSlide = useRef(new Animated.Value(-60)).current;
   const prevPhaseRef = useRef<string>('');
-  // Per-opponent seat scale (up to 7 players = max 6 opponents)
   const opponentScaleAnims = useRef(
     Array.from({ length: 6 }, () => new Animated.Value(1))
   ).current;
-  // Per-trick-card entrance anims (up to 7 cards per trick)
   const trickCardAnims = useRef(
     Array.from({ length: 7 }, () => ({ scale: new Animated.Value(1), opacity: new Animated.Value(1) }))
   ).current;
   const prevTrickLenRef = useRef(0);
   const reduceMotionRef = useRef(false);
   const { width: SCREEN_W } = useWindowDimensions();
+
+  useEffect(() => {
+    void audioService.init();
+    return () => { void audioService.unloadAll(); };
+  }, []);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -110,6 +118,15 @@ export default function GameScreen() {
   useEffect(() => {
     reduceMotionRef.current = reduceMotion;
   }, [reduceMotion]);
+
+  useEffect(() => {
+    if (!gameState) {
+      const t = setTimeout(() => setLoadingTimeout(true), 5000);
+      return () => clearTimeout(t);
+    } else {
+      setLoadingTimeout(false);
+    }
+  }, [gameState]);
 
   useEffect(() => {
     if (reduceMotion) return;
@@ -187,6 +204,7 @@ export default function GameScreen() {
             if (prevTrickRef.current !== key) {
               prevTrickRef.current = key;
               setTrickResult(data.last_completed_trick);
+              void audioService.play('win_trick');
               if (!reduceMotionRef.current) {
                 trickPop.setValue(0);
                 Animated.timing(trickPop, {
@@ -201,6 +219,20 @@ export default function GameScreen() {
               trickResultTimer.current = setTimeout(() => setTrickResult(null), 2500);
             }
           }
+        } else if (data.type === 'emote') {
+          const timestamp = Date.now();
+          setActiveEmotes(prev => ({...prev, [data.player_id]: { emoji: data.emoji, key: timestamp }}));
+          setTimeout(() => {
+            setActiveEmotes(prev => {
+              const current = prev[data.player_id];
+              if (current && current.key === timestamp) {
+                const copy = {...prev};
+                delete copy[data.player_id];
+                return copy;
+              }
+              return prev;
+            });
+          }, 3000);
         } else if (data.type === 'error') {
           setError(data.message);
           void fireHaptic('error');
@@ -239,28 +271,6 @@ export default function GameScreen() {
         },
       },
     ]);
-  };
-
-  const getOpponentSeatStyle = (index: number, count: number) => {
-    const stageWidth = Math.max(280, SCREEN_W - 32);
-    const seatWidth = Math.min(128, Math.max(96, Math.floor(stageWidth / Math.max(3, count + 1))));
-    const seatHeight = 76;
-    const centerX = stageWidth / 2;
-    const centerY = 104;
-    const radiusX = Math.max(64, stageWidth * 0.34);
-    const radiusY = 52;
-    const thetaStart = Math.PI * 1.12;
-    const thetaEnd = Math.PI * 1.88;
-    const theta = count === 1
-      ? Math.PI * 1.5
-      : thetaStart + ((thetaEnd - thetaStart) * index) / Math.max(1, count - 1);
-
-    return {
-      left: centerX + Math.cos(theta) * radiusX - seatWidth / 2,
-      top: centerY + Math.sin(theta) * radiusY - seatHeight / 2,
-      width: seatWidth,
-      height: seatHeight,
-    };
   };
 
   const sendAction = async (action: any, haptic: 'selection' | 'light' | 'medium' | 'success' = 'selection') => {
@@ -355,21 +365,31 @@ export default function GameScreen() {
   // Loading state
   if (!gameState) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.center}>
+      <LinearGradient colors={['#0F2B1D','#060e09']} style={{flex:1}}>
+        <SafeAreaView style={{flex:1, justifyContent:'center', alignItems:'center'}}>
           <ActivityIndicator size="large" color={COLORS.gold} />
-          <Text style={styles.loadingText}>
-            {connected ? 'Loading game...' : 'Connecting...'}
+          <Text style={{color: COLORS.gold, marginTop: 16, fontSize: 16, fontWeight: '600', letterSpacing: 1}}>
+            {connected ? 'Loading game...' : 'Connecting to Server...'}
           </Text>
-        </View>
-      </SafeAreaView>
+          {loadingTimeout && !connected && (
+            <Animated.View entering={FadeIn} style={{marginTop: 32, alignItems:'center', paddingHorizontal: 40}}>
+              <Text style={{color: 'rgba(255,255,255,0.5)', marginBottom: 20, textAlign: 'center'}}>
+                The server seems to be unreachable. Please check your connection.
+              </Text>
+              <TouchableOpacity onPress={handleLeave} style={{paddingVertical: 12, paddingHorizontal: 24, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)'}}>
+                <Text style={{color: '#FFF', fontWeight: '600'}}>Go Back</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   const { phase, players, your_id, your_index } = gameState;
   const isHost = players.find((p) => p.id === your_id)?.is_host || false;
   const myInfo = players[your_index] || players.find((p) => p.id === your_id);
-  const currentPlayerName = players[gameState.current_player_index]?.name || '';
+  const activePlayer = players[gameState.current_player_index];
   const isMyTurn = gameState.current_player_index === your_index;
   const opponents = players.filter((p) => p.id !== your_id);
 
@@ -388,65 +408,56 @@ export default function GameScreen() {
   // === WAITING / LOBBY ===
   if (phase === 'waiting') {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.lobbyWrap}>
-          <TouchableOpacity testID="leave-btn" style={styles.backBtn} onPress={handleLeave}>
-            <Text style={styles.backBtnText}>← Back</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.lobbyTitle}>JUDGEMENT</Text>
-
-          <View style={styles.roomCodeBox}>
-            <Text style={styles.roomCodeLabel}>ROOM CODE</Text>
-            <Text style={styles.roomCode}>{gameState.room_id}</Text>
-            <Text style={styles.roomCodeHint}>Share this code with friends</Text>
-          </View>
-
-          <Text style={styles.playerCountText}>
-            Players ({players.length}/7)
-          </Text>
-
-          <View style={styles.playerList}>
-            {players.map((p) => (
-              <View key={p.id} testID={`player-${p.id}`} style={styles.playerItem}>
-                <View style={[styles.avatar, p.id === your_id && styles.avatarYou]}>
-                  <Text style={styles.avatarText}>{p.name[0]?.toUpperCase()}</Text>
-                </View>
-                <Text style={styles.playerName}>{p.name}</Text>
-                {p.is_host && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>HOST</Text>
-                  </View>
-                )}
-                {p.id === your_id && (
-                  <View style={[styles.badge, styles.badgeYou]}>
-                    <Text style={styles.badgeText}>YOU</Text>
-                  </View>
-                )}
-              </View>
-            ))}
-          </View>
-
-          {isHost && players.length >= 3 && (
-            <TouchableOpacity
-              testID="start-game-btn"
-              style={styles.goldButton}
-              onPress={() => void sendAction({ action: 'start_game' }, 'medium')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.goldButtonText}>Start Game</Text>
+      <LinearGradient colors={['#0F2B1D','#060e09']} style={{flex:1}}>
+        <SafeAreaView style={{flex:1}}>
+          <View style={{paddingHorizontal: 24, paddingTop: 20, paddingBottom: 40, flex: 1}}>
+            <TouchableOpacity testID="leave-btn" onPress={handleLeave} style={{alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 24}}>
+              <Text style={{color: theme.ivory, fontWeight: '600'}}>← Back</Text>
             </TouchableOpacity>
-          )}
-          {isHost && players.length < 3 && (
-            <Text style={styles.waitText}>Need at least 3 players to start</Text>
-          )}
-          {!isHost && (
-            <Text style={styles.waitText}>Waiting for host to start...</Text>
-          )}
 
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
-      </SafeAreaView>
+            <Text style={{color: theme.gold, fontSize: 32, fontWeight: '900', letterSpacing: 6, textAlign: 'center', marginBottom: 32}}>JUDGEMENT</Text>
+
+            <View style={{backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: theme.border, borderRadius: 24, padding: 24, alignItems: 'center', marginBottom: 40}}>
+              <Text style={{color: 'rgba(245,241,230,0.5)', fontSize: 10, letterSpacing: 2, fontWeight: '800', marginBottom: 8}}>ROOM CODE</Text>
+              <Text style={{color: theme.goldLight || theme.goldBright, fontSize: 42, fontWeight: '900', letterSpacing: 12}}>{gameState.room_id}</Text>
+              <Text style={{color: 'rgba(245,241,230,0.5)', fontSize: 12, marginTop: 8}}>Share this code with friends</Text>
+            </View>
+
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
+              <Text style={{color: theme.ivory, fontSize: 18, fontWeight: '700'}}>Players</Text>
+              <Text style={{color: theme.gold, fontSize: 14, fontWeight: '800'}}>{players.length}/7</Text>
+            </View>
+
+            <ScrollView contentContainerStyle={{gap: 12}} showsVerticalScrollIndicator={false}>
+              {players.map((p, i) => (
+                <View key={p.id} testID={`player-${p.id}`} style={{flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: theme.border, borderRadius: 16, padding: 12}}>
+                  <View style={{width: 40, height: 40, borderRadius: 20, backgroundColor: `hsl(${(i * 137) % 360},45%,40%)`, alignItems: 'center', justifyContent: 'center', marginRight: 16}}>
+                    <Text style={{color: theme.ivory, fontWeight: '800', fontSize: 18}}>{p.name[0]?.toUpperCase()}</Text>
+                  </View>
+                  <Text style={{color: theme.ivory, fontSize: 16, fontWeight: '600', flex: 1}}>{p.name}</Text>
+                  {p.is_host && <View style={{backgroundColor: 'rgba(212,175,55,0.15)', borderWidth: 1, borderColor: theme.goldDim, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginRight: 8}}><Text style={{color: theme.gold, fontSize: 10, fontWeight: '800', letterSpacing: 1}}>HOST</Text></View>}
+                  {p.id === your_id && <View style={{backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: theme.border, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8}}><Text style={{color: theme.ivory, fontSize: 10, fontWeight: '800', letterSpacing: 1}}>YOU</Text></View>}
+                </View>
+              ))}
+            </ScrollView>
+
+            <View style={{marginTop: 24}}>
+              {isHost && players.length >= 3 && (
+                <TouchableOpacity testID="start-game-btn" onPress={() => void sendAction({ action: 'start_game' }, 'medium')} style={{backgroundColor: theme.gold, paddingVertical: 18, borderRadius: 99, alignItems: 'center', shadowColor: theme.gold, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: {width: 0, height: 4}}}>
+                  <Text style={{color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 1}}>Start Game</Text>
+                </TouchableOpacity>
+              )}
+              {isHost && players.length < 3 && (
+                <Text style={{color: 'rgba(245,241,230,0.5)', textAlign: 'center', fontSize: 14}}>Need at least 3 players to start</Text>
+              )}
+              {!isHost && (
+                <Text style={{color: 'rgba(245,241,230,0.5)', textAlign: 'center', fontSize: 14}}>Waiting for host to start...</Text>
+              )}
+            </View>
+            {error ? <Text style={{color: theme.rose, textAlign: 'center', marginTop: 16}}>{error}</Text> : null}
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
@@ -454,90 +465,71 @@ export default function GameScreen() {
   if (phase === 'game_over') {
     const sorted = [...players].sort((a, b) => b.total_score - a.total_score);
     return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.gameOverWrap}>
-          <Text style={styles.gameOverTitle}>Game Over!</Text>
+      <LinearGradient colors={['#0F2B1D','#060e09']} style={{flex:1}}>
+        <SafeAreaView style={{flex:1}}>
+          <ScrollView contentContainerStyle={{paddingHorizontal: 24, paddingTop: 40, paddingBottom: 60, flexGrow: 1, alignItems: 'center'}}>
+            <Text style={{color: theme.gold, fontSize: 36, fontWeight: '900', letterSpacing: 4, marginBottom: 40, textShadowColor: theme.gold, textShadowRadius: 20}}>GAME OVER</Text>
 
-          <View style={styles.podium}>
-            {sorted.map((p, i) => (
-              <View key={p.id} style={styles.standingItem}>
-                <Text style={styles.standingRank}>#{i + 1}</Text>
-                <View style={[styles.avatar, i === 0 && styles.avatarWinner]}>
-                  <Text style={styles.avatarText}>{p.name[0]?.toUpperCase()}</Text>
+            <View style={{width: '100%', backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: theme.border, borderRadius: 24, padding: 24, marginBottom: 40}}>
+              <Text style={{color: theme.ivory, fontSize: 18, fontWeight: '800', marginBottom: 20, textAlign: 'center'}}>Final Standings</Text>
+              {sorted.map((p, i) => (
+                <View key={p.id} style={{flexDirection: 'row', alignItems: 'center', backgroundColor: i === 0 ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: i === 0 ? theme.goldDim : theme.border, borderRadius: 16, padding: 12, marginBottom: 12}}>
+                  <Text style={{color: i === 0 ? theme.gold : theme.ivory, fontSize: 18, fontWeight: '900', width: 30}}>#{i + 1}</Text>
+                  <View style={{width: 40, height: 40, borderRadius: 20, backgroundColor: `hsl(${(i * 137) % 360},45%,40%)`, alignItems: 'center', justifyContent: 'center', marginRight: 16}}>
+                    <Text style={{color: theme.ivory, fontWeight: '800', fontSize: 18}}>{p.name[0]?.toUpperCase()}</Text>
+                  </View>
+                  <Text style={{color: i === 0 ? theme.goldLight : theme.ivory, fontSize: 16, fontWeight: '700', flex: 1}}>{p.name}</Text>
+                  <Text style={{color: i === 0 ? theme.gold : theme.ivory, fontSize: 18, fontWeight: '900'}}>{p.total_score} pts</Text>
                 </View>
-                <Text style={styles.standingName}>{p.name}</Text>
-                <Text style={[styles.standingScore, i === 0 && { color: COLORS.gold }]}>
-                  {p.total_score} pts
-                </Text>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
 
-          <ScoreBoard
-            roundHistory={gameState.round_history}
-            players={players}
-          />
+            <View style={{width: '100%', marginBottom: 40}}>
+              <ScoreBoard roundHistory={gameState.round_history} players={players} />
+            </View>
 
-          <View style={styles.gameOverBtns}>
-            {isHost && (
-              <TouchableOpacity
-                testID="new-game-btn"
-                style={styles.goldButton}
-                onPress={() => void sendAction({ action: 'new_game' }, 'medium')}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.goldButtonText}>Play Again</Text>
+            <View style={{width: '100%', gap: 16}}>
+              {isHost && (
+                <TouchableOpacity onPress={() => void sendAction({ action: 'new_game' }, 'medium')} style={{backgroundColor: theme.gold, paddingVertical: 18, borderRadius: 99, alignItems: 'center', shadowColor: theme.gold, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: {width: 0, height: 4}}}>
+                  <Text style={{color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 1}}>Play Again</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={() => { ws.current?.close(); router.replace('/'); }} style={{backgroundColor: 'transparent', borderWidth: 1.5, borderColor: theme.goldDim, paddingVertical: 18, borderRadius: 99, alignItems: 'center'}}>
+                <Text style={{color: theme.goldLight, fontSize: 16, fontWeight: '800', letterSpacing: 1}}>Back to Home</Text>
               </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              testID="home-btn"
-              style={styles.outlineButton}
-              onPress={() => {
-                ws.current?.close();
-                router.replace('/');
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.outlineButtonText}>Back to Home</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   // === ROUND END ===
   if (phase === 'round_end') {
     return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.roundEndWrap}>
-          <Text style={styles.roundEndTitle}>Round Complete</Text>
+      <LinearGradient colors={['#0F2B1D','#060e09']} style={{flex:1}}>
+        <SafeAreaView style={{flex:1}}>
+          <ScrollView contentContainerStyle={{paddingHorizontal: 24, paddingTop: 40, paddingBottom: 60, flexGrow: 1, alignItems: 'center'}}>
+            <Text style={{color: theme.gold, fontSize: 32, fontWeight: '900', letterSpacing: 4, marginBottom: 40}}>Round Complete</Text>
 
-          <ScoreBoard
-            roundHistory={gameState.round_history}
-            players={players}
-            currentRound={gameState.current_round}
-          />
+            <View style={{width: '100%', marginBottom: 40}}>
+              <ScoreBoard roundHistory={gameState.round_history} players={players} currentRound={gameState.current_round} />
+            </View>
 
-          {isHost && (
-            <TouchableOpacity
-              testID="next-round-btn"
-              style={[styles.goldButton, { marginTop: 20 }]}
-              onPress={() => void sendAction({ action: 'next_round' }, 'medium')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.goldButtonText}>Next Round</Text>
-            </TouchableOpacity>
-          )}
-          {!isHost && (
-            <Text style={[styles.waitText, { marginTop: 16 }]}>
-              Waiting for host to start next round...
-            </Text>
-          )}
-
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </ScrollView>
-      </SafeAreaView>
+            <View style={{width: '100%', gap: 16}}>
+              {isHost && (
+                <TouchableOpacity onPress={() => void sendAction({ action: 'next_round' }, 'medium')} style={{backgroundColor: theme.gold, paddingVertical: 18, borderRadius: 99, alignItems: 'center', shadowColor: theme.gold, shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: {width: 0, height: 4}}}>
+                  <Text style={{color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 1}}>Next Round</Text>
+                </TouchableOpacity>
+              )}
+              {!isHost && (
+                <Text style={{color: 'rgba(245,241,230,0.5)', textAlign: 'center', fontSize: 14}}>Waiting for host to start next round...</Text>
+              )}
+              {error ? <Text style={{color: theme.rose, textAlign: 'center', marginTop: 16}}>{error}</Text> : null}
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
@@ -576,9 +568,10 @@ export default function GameScreen() {
       score: opp.total_score,
       bid: opp.bid,
       tricksWon: opp.tricks_won,
-      isActive: gameState.current_player_index === pIdx,
-      avatarHue: (pIdx * 137) % 360,
+      isActive: opp.id === activePlayer?.id,
+      avatarHue: ((idx + 1) * 137) % 360,
       cardsLeft: opp.card_count,
+      activeEmote: activeEmotes[opp.id] || null,
     };
   });
 
@@ -655,8 +648,30 @@ export default function GameScreen() {
             bid={myInfo?.bid ?? null}
             tricksWon={myInfo?.tricks_won || 0}
             isYourTurn={isMyTurn}
+            onEmotePress={() => setShowEmotePicker(true)}
+            activeEmote={activeEmotes[myInfo?.id || '']}
           />
         </View>
+
+        {showEmotePicker && (
+          <View style={{position: 'absolute', bottom: 120, alignSelf: 'center', backgroundColor: theme.glassStrong, borderRadius: 24, padding: 16, flexDirection: 'row', flexWrap: 'wrap', width: 280, justifyContent: 'center', gap: 12, borderWidth: 1, borderColor: theme.border, zIndex: 100}}>
+            {EMOTES.map(emoji => (
+              <TouchableOpacity
+                key={emoji}
+                onPress={() => {
+                  sendAction({ action: 'send_emote', emoji }, 'light');
+                  setShowEmotePicker(false);
+                }}
+                style={{width: 48, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 24}}
+              >
+                <Text style={{fontSize: 28}}>{emoji}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setShowEmotePicker(false)} style={{width: '100%', marginTop: 8, paddingVertical: 8, alignItems: 'center'}}>
+              <Text style={{color: theme.ivory, opacity: 0.5, fontWeight: '700'}}>CLOSE</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <BiddingSheet
           open={phase === 'bidding' && isMyTurn}
