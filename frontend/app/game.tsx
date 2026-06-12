@@ -12,18 +12,24 @@ import {
   Easing,
   AccessibilityInfo,
   Platform,
-  StatusBar,
+  StatusBar as RNStatusBar,
   useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
-import PlayingCard from '../components/PlayingCard';
-import BiddingModal from '../components/BiddingModal';
-import HandDisplay from '../components/HandDisplay';
-import ScoreBoard from '../components/ScoreBoard';
+import Reanimated, { FadeIn } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
+import ScoreBoard from '../components/ScoreBoard';
+import { StatusBarTop } from '../components/StatusBarTop';
+import { OpponentBadge, Opponent } from '../components/OpponentBadge';
+import { CenterTrick, TrickCard } from '../components/CenterTrick';
+import { CardFan, HandCard } from '../components/CardFan';
+import { PlayerDock } from '../components/PlayerDock';
+import { BiddingSheet } from '../components/BiddingSheet';
+
+const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 24) : 0;
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
@@ -536,247 +542,130 @@ export default function GameScreen() {
   }
 
   // === BIDDING / PLAYING (Main Game Table) ===
-  const trumpColor = SUIT_DISPLAY_COLORS[gameState.trump_suit] || '#FFF';
-  const trumpSymbol = SUIT_SYMBOLS[gameState.trump_suit] || '';
-  const showBiddingModal = phase === 'bidding' && isMyTurn;
-  const seatCount = opponents.length;
-
-  // Determine trick cards to display
   const displayTrickCards = trickResult
     ? trickResult.cards
     : gameState.current_trick;
 
+  const mapSuit = (suit: string): 'S'|'H'|'D'|'C' => {
+    switch(suit) {
+      case 'hearts': return 'H';
+      case 'diamonds': return 'D';
+      case 'clubs': return 'C';
+      default: return 'S';
+    }
+  };
+
+  const hand: HandCard[] = gameState.your_hand.map((c, i) => ({
+    id: `${c.suit}-${c.rank}-${i}`,
+    suit: mapSuit(c.suit),
+    rank: c.rank as any,
+    playable: phase === 'playing' && isMyTurn ? playableIndices.has(i) : true
+  }));
+
+  const trick: TrickCard[] = displayTrickCards.map((tc: any) => ({
+    card: { suit: mapSuit(tc.card.suit), rank: tc.card.rank as any },
+    playerName: players[tc.player_index]?.name || '?',
+    playerHue: (tc.player_index * 137) % 360,
+  }));
+
+  const mappedOpponents: Opponent[] = opponents.map((opp, idx) => {
+    const pIdx = players.findIndex(p => p.id === opp.id);
+    return {
+      id: opp.id,
+      name: opp.name,
+      score: opp.total_score,
+      bid: opp.bid,
+      tricksWon: opp.tricks_won,
+      isActive: gameState.current_player_index === pIdx,
+      avatarHue: (pIdx * 137) % 360,
+      cardsLeft: opp.card_count,
+    };
+  });
+
+  const mappedSeatCount = mappedOpponents.length;
+  const leftOpps: Opponent[] = [];
+  const topOpps: Opponent[] = [];
+  const rightOpps: Opponent[] = [];
+
+  mappedOpponents.forEach((opp, i) => {
+    if (mappedSeatCount === 1) {
+      topOpps.push(opp);
+    } else if (mappedSeatCount === 2) {
+      if (i===0) leftOpps.push(opp); else rightOpps.push(opp);
+    } else if (mappedSeatCount === 3) {
+      if (i===0) leftOpps.push(opp);
+      else if (i===1) topOpps.push(opp);
+      else rightOpps.push(opp);
+    } else if (mappedSeatCount === 4) {
+      if (i===0) leftOpps.push(opp);
+      else if (i===1||i===2) topOpps.push(opp);
+      else rightOpps.push(opp);
+    } else {
+      if (i < mappedSeatCount/3) leftOpps.push(opp);
+      else if (i > (mappedSeatCount*2)/3) rightOpps.push(opp);
+      else topOpps.push(opp);
+    }
+  });
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.gameWrap}>
-        <View style={styles.tableBackdrop}>
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.ambientGlow,
-              styles.ambientGlowLeft,
-              {
-                opacity: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [0.2, 0.42] }),
-                transform: [
-                  {
-                    scale: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1.06] }),
-                  },
-                ],
-              },
-            ]}
+    <LinearGradient colors={['#0F2B1D','#060e09']} style={{flex:1}}>
+      <SafeAreaView style={{flex:1}}>
+        <View style={{flex:1, padding:16, gap:16}}>
+          <StatusBarTop
+            trump={mapSuit(gameState.trump_suit)}
+            round={gameState.current_round}
+            totalRounds={gameState.total_rounds}
+            yourTricks={myInfo?.tricks_won || 0}
+            yourBid={myInfo?.bid ?? null}
+            onLeave={handleLeave}
           />
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.ambientGlow,
-              styles.ambientGlowRight,
-              {
-                opacity: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [0.16, 0.34] }),
-                transform: [
-                  {
-                    scale: ambientPulse.interpolate({ inputRange: [0, 1], outputRange: [1.06, 0.96] }),
-                  },
-                ],
-              },
-            ]}
-          />
-        </View>
-
-        <View style={styles.tableShell}>
-          <View style={styles.statusRail}>
-            <TouchableOpacity testID="leave-game-btn" onPress={handleLeave} style={styles.leaveButton}>
-              <Text style={styles.leaveBtnText}>← Leave</Text>
-            </TouchableOpacity>
-
-            <View style={styles.statusCluster}>
-              <StatusPill label="Trump" value={trumpSymbol || '—'} valueStyle={{ color: trumpColor }} />
-              <StatusPill label="Round" value={`${gameState.current_round}/${gameState.total_rounds}`} />
-              <StatusPill label="Cards" value={`${gameState.cards_this_round}`} />
-              <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
-              <StatusPill label={connected ? 'Live' : 'Offline'} value={connected ? 'Connected' : 'Retrying'} muted={!connected} />
+          
+          <View style={{flex:1, flexDirection:'row', justifyContent:'space-between'}}>
+            <View style={{gap:16, justifyContent:'center'}}>
+              {leftOpps.map(o => <OpponentBadge key={o.id} o={o} />)}
             </View>
-          </View>
-
-          <View style={styles.opponentStage}>
-            {opponents.map((opp, index) => {
-              const oppIdx = players.findIndex((p) => p.id === opp.id);
-              const isOppTurn = gameState.current_player_index === oppIdx;
-              const isDealer = gameState.dealer_index === oppIdx;
-              return (
-                <Animated.View
-                  key={opp.id}
-                  testID={`opponent-${opp.id}`}
-                  style={[
-                    styles.opponentSeat,
-                    getOpponentSeatStyle(index, seatCount),
-                    isOppTurn && styles.opponentSeatActive,
-                    { transform: [{ scale: opponentScaleAnims[index] ?? 1 }] },
-                  ]}
-                >
-                  <View style={styles.opponentSeatTop}>
-                    <View style={[styles.seatAvatar, isOppTurn && styles.seatAvatarActive]}>
-                      <Text style={styles.seatAvatarText}>{opp.name[0]?.toUpperCase()}</Text>
-                    </View>
-                    <View style={styles.opponentSeatMeta}>
-                      <View style={styles.seatNameRow}>
-                        <Text style={styles.opponentName} numberOfLines={1}>
-                          {opp.name}
-                        </Text>
-                        {isDealer && <Text style={styles.dealerBadge}>D</Text>}
-                      </View>
-                      <Text style={styles.opponentScore}>{opp.total_score} pts</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.opponentBody}>
-                    {opp.has_bid || opp.bid !== null
-                      ? `Bid ${opp.bid}  Won ${opp.tricks_won}`
-                      : phase === 'bidding'
-                        ? 'Waiting to bid'
-                        : `Cards ${opp.card_count}`}
-                  </Text>
-                  {!opp.is_connected && (
-                    <Text style={styles.disconnected}>Offline</Text>
-                  )}
-                </Animated.View>
-              );
-            })}
-          </View>
-
-          <Animated.View style={[styles.centerStage, { opacity: phaseAnim }]}>
-            <Animated.View
-              style={[
-                styles.turnBanner,
-                {
-                  opacity: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.7, 1] }),
-                  transform: [
-                    {
-                      scale: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.98, 1.02] }),
-                    },
-                  ],
-                },
-              ]}
-            >
-              <Text style={[styles.turnText, isMyTurn && styles.turnTextActive]}>
-                {phase === 'bidding'
-                  ? isMyTurn
-                    ? 'Your turn to bid'
-                    : `Waiting for ${currentPlayerName} to bid`
-                  : isMyTurn
-                    ? 'Your turn to play'
-                    : `Waiting for ${currentPlayerName}`}
-              </Text>
-            </Animated.View>
-
-            <View style={styles.trickTable}>
-              <View style={styles.tableHeaderRow}>
-                <Text style={styles.tableHeaderLabel}>
-                  {phase === 'bidding' ? 'Bidding round' : 'Playing trick'}
-                </Text>
-                <Text style={styles.tableHeaderBadge}>
-                  {gameState.current_player_index === your_index ? 'Your move' : 'Table live'}
-                </Text>
-              </View>
-
-              {trickResult && (
-                <Animated.View
-                  style={[
-                    styles.trickResultCard,
-                    {
-                      opacity: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.1, 1] }),
-                      transform: [
-                        {
-                          scale: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the trick</Text>
-                </Animated.View>
-              )}
-
-              {displayTrickCards && displayTrickCards.length > 0 ? (
-                <View style={styles.trickCards}>
-                  {displayTrickCards.map((tc: any, i: number) => {
-                    const isWinner =
-                      trickResult && tc.player_index === trickResult.winner_index;
-                    const cardAnim = trickCardAnims[i];
-                    return (
-                      <Animated.View
-                        key={i}
-                        style={[
-                          styles.trickCardWrap,
-                          cardAnim ? {
-                            opacity: cardAnim.opacity,
-                            transform: [{ scale: cardAnim.scale }],
-                          } : undefined,
-                        ]}
-                      >
-                        <View style={isWinner ? styles.winnerHighlight : undefined}>
-                          <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
-                        </View>
-                        <Text style={styles.trickCardName}>
-                          {players[tc.player_index]?.name || '?'}
-                        </Text>
-                      </Animated.View>
-                    );
-                  })}
-                </View>
-              ) : (
-                <View style={styles.emptyTrick}>
-                  <Text style={styles.emptyTrickLabel}>
-                    {phase === 'bidding' ? 'Bids are being locked in' : 'Play a card to open the trick'}
-                  </Text>
+            <View style={{flex:1, paddingHorizontal:10}}>
+              {topOpps.length > 0 && (
+                <View style={{flexDirection:'row', justifyContent:'center', gap:10, marginBottom:16}}>
+                  {topOpps.map(o => <OpponentBadge key={o.id} o={o} />)}
                 </View>
               )}
+              <CenterTrick cards={trick} />
             </View>
-          </Animated.View>
-
-          <View style={styles.selfDock}>
-            <View style={styles.selfMeta}>
-              <View>
-                <Text style={styles.selfName}>{myInfo?.name || params.player_name}</Text>
-                <Text style={styles.selfSubtext}>
-                  {gameState.dealer_index === your_index ? 'Dealer' : 'Player'}
-                  {myInfo?.bid !== null && myInfo?.bid !== undefined
-                    ? ` • Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
-                    : ' • No bid yet'}
-                </Text>
-              </View>
-              <Text style={styles.selfScore}>{myInfo?.total_score || 0} pts</Text>
+            <View style={{gap:16, justifyContent:'center'}}>
+              {rightOpps.map(o => <OpponentBadge key={o.id} o={o} />)}
             </View>
           </View>
 
-          <View style={styles.handDock}>
-            <HandDisplay
-              hand={gameState.your_hand}
-              playableIndices={phase === 'playing' && isMyTurn ? playableIndices : null}
-              onPlayCard={(card) => void sendAction({ action: 'play_card', card }, 'medium')}
-              phase={phase}
+          <View style={{ height: 160 }}>
+            <CardFan
+              hand={hand}
+              onPlay={(id) => {
+                const idx = hand.findIndex(c => c.id === id);
+                if (idx !== -1) {
+                  sendAction({ action: 'play_card', card: gameState.your_hand[idx] }, 'medium');
+                }
+              }}
             />
           </View>
 
-          {error ? (
-            <Animated.View
-              style={[styles.errorBanner, { transform: [{ translateY: errorSlide }] }]}
-            >
-              <Text style={styles.errorBannerText}>{error}</Text>
-            </Animated.View>
-          ) : null}
-
-          <BiddingModal
-            visible={showBiddingModal}
-            yourHand={gameState.your_hand}
-            cardsThisRound={gameState.cards_this_round}
-            trumpSuit={gameState.trump_suit}
-            currentRound={gameState.current_round}
-            totalRounds={gameState.total_rounds}
-            restrictedBids={gameState.restricted_bids || []}
-            onPlaceBid={(bid) => void sendAction({ action: 'place_bid', bid }, 'medium')}
+          <PlayerDock
+            name={myInfo?.name || params.player_name || 'You'}
+            score={myInfo?.total_score || 0}
+            bid={myInfo?.bid ?? null}
+            tricksWon={myInfo?.tricks_won || 0}
+            isYourTurn={isMyTurn}
           />
         </View>
-      </View>
-    </SafeAreaView>
+
+        <BiddingSheet
+          open={phase === 'bidding' && isMyTurn}
+          maxBid={gameState.cards_this_round}
+          forbiddenBid={gameState.restricted_bids?.[0] ?? null}
+          onSubmit={(b) => sendAction({ action: 'place_bid', bid: b }, 'medium')}
+        />
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 

@@ -74,3 +74,17 @@ export const FONTS = {
   bodyMedium:  'DMSans_600SemiBold',
   mono:        'JetBrainsMono_700Bold',
 } as const;
+
+export const theme = {
+  feltDeep: '#0B1F18',
+  felt: '#143028',
+  feltLight: '#1E4A3C',
+  gold: '#D4AF37',
+  goldBright: '#F2CB57',
+  goldDim: '#8A6E1E',
+  ivory: '#F5F1E6',
+  glass: 'rgba(10, 22, 18, 0.55)',
+  glassStrong: 'rgba(8, 18, 14, 0.78)',
+  border: 'rgba(255,255,255,0.10)',
+  rose: '#E04E5C',
+};
