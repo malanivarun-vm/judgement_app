@@ -48,6 +48,7 @@ export default function PlayingCard({ card, size = 'hand', cardStyle = 'minimal'
   const [reduceMotion, setReduceMotion] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const liftAnim  = useRef(new Animated.Value(0)).current;
+  const dimAnim   = useRef(new Animated.Value(dimmed ? 0.55 : 1)).current;
 
   const dims   = CARD_SIZES[size];
   const fonts  = FONT_SIZES[size];
@@ -67,6 +68,14 @@ export default function PlayingCard({ card, size = 'hand', cardStyle = 'minimal'
       Animated.spring(liftAnim,  { toValue: highlighted ? -8  : 0, useNativeDriver: true, friction: 6, tension: 140 }),
     ]).start();
   }, [highlighted, reduceMotion]);
+
+  useEffect(() => {
+    Animated.timing(dimAnim, {
+      toValue: dimmed ? 0.55 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [dimmed]);
 
   const onPressIn  = () => { if (!reduceMotion) Animated.spring(scaleAnim, { toValue: 0.95, useNativeDriver: true, friction: 6, tension: 140 }).start(); };
   const onPressOut = () => { if (!reduceMotion) Animated.spring(scaleAnim, { toValue: highlighted ? 1.05 : 1, useNativeDriver: true, friction: 6, tension: 140 }).start(); };
@@ -89,7 +98,7 @@ export default function PlayingCard({ card, size = 'hand', cardStyle = 'minimal'
         {
           width: dims.width, height: dims.height,
           backgroundColor: bgColor, borderColor, borderWidth,
-          opacity: dimmed ? 0.55 : 1,
+          opacity: dimAnim,
           shadowColor: highlighted ? COLORS.gold : '#000',
           shadowOpacity: highlighted ? 0.55 : 0.28,
           shadowRadius: highlighted ? 12 : 8,

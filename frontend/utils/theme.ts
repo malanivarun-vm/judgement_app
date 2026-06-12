@@ -60,6 +60,12 @@ export type CardSizeKey = keyof typeof CARD_SIZES;
  *  foil    — warm cream tint + gold border frame */
 export type CardStyle = 'minimal' | 'pips' | 'foil';
 
+export const ANIM = {
+  quick:    150,
+  standard: 260,
+  slow:     500,
+} as const;
+
 // Load via expo-font or @expo-google-fonts in _layout.tsx
 export const FONTS = {
   heading:     'Outfit_900Black',

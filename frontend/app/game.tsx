@@ -25,7 +25,7 @@ import ScoreBoard from '../components/ScoreBoard';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
 interface GameState {
   type: string;
@@ -80,6 +80,18 @@ export default function GameScreen() {
   const ambientPulse = useRef(new Animated.Value(0)).current;
   const turnPulse = useRef(new Animated.Value(0)).current;
   const trickPop = useRef(new Animated.Value(0)).current;
+  const phaseAnim = useRef(new Animated.Value(1)).current;
+  const errorSlide = useRef(new Animated.Value(-60)).current;
+  const prevPhaseRef = useRef<string>('');
+  // Per-opponent seat scale (up to 7 players = max 6 opponents)
+  const opponentScaleAnims = useRef(
+    Array.from({ length: 6 }, () => new Animated.Value(1))
+  ).current;
+  // Per-trick-card entrance anims (up to 7 cards per trick)
+  const trickCardAnims = useRef(
+    Array.from({ length: 7 }, () => ({ scale: new Animated.Value(1), opacity: new Animated.Value(1) }))
+  ).current;
+  const prevTrickLenRef = useRef(0);
   const reduceMotionRef = useRef(false);
   const { width: SCREEN_W } = useWindowDimensions();
 
@@ -270,6 +282,69 @@ export default function GameScreen() {
       }).start();
     }
   }, [gameState, reduceMotion, turnPulse]);
+
+  // Phase crossfade
+  useEffect(() => {
+    if (!gameState || reduceMotion) return;
+    if (prevPhaseRef.current && prevPhaseRef.current !== gameState.phase) {
+      Animated.sequence([
+        Animated.timing(phaseAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(phaseAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+    prevPhaseRef.current = gameState.phase;
+  }, [gameState?.phase, reduceMotion]);
+
+  // Opponent seat glow spring on active player change
+  useEffect(() => {
+    if (!gameState || reduceMotion) return;
+    opponentScaleAnims.forEach((anim, i) => {
+      const opp = gameState.players.filter((p) => p.id !== gameState.your_id)[i];
+      if (!opp) return;
+      const oppIdx = gameState.players.findIndex((p) => p.id === opp.id);
+      const isActive = gameState.current_player_index === oppIdx;
+      if (isActive) {
+        Animated.sequence([
+          Animated.spring(anim, { toValue: 1.06, friction: 4, tension: 280, useNativeDriver: true }),
+          Animated.spring(anim, { toValue: 1,    friction: 5, tension: 200, useNativeDriver: true }),
+        ]).start();
+      } else {
+        Animated.timing(anim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+      }
+    });
+  }, [gameState?.current_player_index, reduceMotion]);
+
+  // Trick card entrance stagger
+  useEffect(() => {
+    if (!gameState || reduceMotion) return;
+    const len = gameState.current_trick?.length ?? 0;
+    if (len > prevTrickLenRef.current) {
+      const newIdx = len - 1;
+      const anim = trickCardAnims[newIdx];
+      if (anim) {
+        anim.scale.setValue(0.6);
+        anim.opacity.setValue(0);
+        Animated.parallel([
+          Animated.spring(anim.scale,   { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }),
+          Animated.timing(anim.opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        ]).start();
+      }
+    } else if (len === 0) {
+      // Reset all on trick clear
+      trickCardAnims.forEach(a => { a.scale.setValue(1); a.opacity.setValue(1); });
+    }
+    prevTrickLenRef.current = len;
+  }, [gameState?.current_trick?.length, reduceMotion]);
+
+  // Error banner slide
+  useEffect(() => {
+    if (reduceMotion) return;
+    if (error) {
+      Animated.spring(errorSlide, { toValue: 0, friction: 7, tension: 180, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(errorSlide, { toValue: -60, duration: 200, useNativeDriver: true }).start();
+    }
+  }, [error, reduceMotion]);
 
   // Loading state
   if (!gameState) {
@@ -528,13 +603,14 @@ export default function GameScreen() {
               const isOppTurn = gameState.current_player_index === oppIdx;
               const isDealer = gameState.dealer_index === oppIdx;
               return (
-                <View
+                <Animated.View
                   key={opp.id}
                   testID={`opponent-${opp.id}`}
                   style={[
                     styles.opponentSeat,
                     getOpponentSeatStyle(index, seatCount),
                     isOppTurn && styles.opponentSeatActive,
+                    { transform: [{ scale: opponentScaleAnims[index] ?? 1 }] },
                   ]}
                 >
                   <View style={styles.opponentSeatTop}>
@@ -561,12 +637,12 @@ export default function GameScreen() {
                   {!opp.is_connected && (
                     <Text style={styles.disconnected}>Offline</Text>
                   )}
-                </View>
+                </Animated.View>
               );
             })}
           </View>
 
-          <View style={styles.centerStage}>
+          <Animated.View style={[styles.centerStage, { opacity: phaseAnim }]}>
             <Animated.View
               style={[
                 styles.turnBanner,
@@ -624,15 +700,25 @@ export default function GameScreen() {
                   {displayTrickCards.map((tc: any, i: number) => {
                     const isWinner =
                       trickResult && tc.player_index === trickResult.winner_index;
+                    const cardAnim = trickCardAnims[i];
                     return (
-                      <View key={i} style={styles.trickCardWrap}>
+                      <Animated.View
+                        key={i}
+                        style={[
+                          styles.trickCardWrap,
+                          cardAnim ? {
+                            opacity: cardAnim.opacity,
+                            transform: [{ scale: cardAnim.scale }],
+                          } : undefined,
+                        ]}
+                      >
                         <View style={isWinner ? styles.winnerHighlight : undefined}>
                           <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
                         </View>
                         <Text style={styles.trickCardName}>
                           {players[tc.player_index]?.name || '?'}
                         </Text>
-                      </View>
+                      </Animated.View>
                     );
                   })}
                 </View>
@@ -644,7 +730,7 @@ export default function GameScreen() {
                 </View>
               )}
             </View>
-          </View>
+          </Animated.View>
 
           <View style={styles.selfDock}>
             <View style={styles.selfMeta}>
@@ -671,9 +757,11 @@ export default function GameScreen() {
           </View>
 
           {error ? (
-            <View style={styles.errorBanner}>
+            <Animated.View
+              style={[styles.errorBanner, { transform: [{ translateY: errorSlide }] }]}
+            >
               <Text style={styles.errorBannerText}>{error}</Text>
-            </View>
+            </Animated.View>
           ) : null}
 
           <BiddingModal

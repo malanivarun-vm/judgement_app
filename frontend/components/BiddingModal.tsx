@@ -1,10 +1,7 @@
-// Redesigned bidding modal with giant number picker + hand grid preview.
-// Drop-in replacement — same required props as previous BiddingModal.
-
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Modal, Platform, AccessibilityInfo, ScrollView,
+  Modal, Platform, AccessibilityInfo, ScrollView, Animated,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, CardStyle } from '../utils/theme';
@@ -29,24 +26,61 @@ export default function BiddingModal({
 }: BiddingModalProps) {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [selectedBid, setSelectedBid]   = useState(0);
+  const [displayedBid, setDisplayedBid] = useState(0);
 
   const bidOptions   = useMemo(() => Array.from({ length: cardsThisRound + 1 }, (_, i) => i), [cardsThisRound]);
   const isRestricted = (b: number) => restrictedBids.includes(b);
 
   const trumpSymbol = SUIT_SYMBOLS[trumpSuit] || '';
   const trumpColor  = trumpSuit === 'hearts' || trumpSuit === 'diamonds' ? COLORS.suitRed : '#FFFFFF';
+  const cardSize    = yourHand.length > 8 ? 'small' : 'bid';
 
-  const cardSize = yourHand.length > 8 ? 'small' : 'bid';
+  // Arrow press scale refs
+  const decScaleAnim = useRef(new Animated.Value(1)).current;
+  const incScaleAnim = useRef(new Animated.Value(1)).current;
+
+  // Number cross-fade
+  const numberFade = useRef(new Animated.Value(1)).current;
+
+  // Dot width anims — one per possible bid option (max cards + 1, so allocate generously)
+  const dotWidthAnims = useRef<Animated.Value[]>(
+    Array.from({ length: 20 }, () => new Animated.Value(8))
+  ).current;
+
+  // Restricted flash opacity
+  const restrictedFlash = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
   }, []);
 
+  // Reset to first valid bid when modal opens
   useEffect(() => {
     if (!visible) return;
     const first = bidOptions.find(b => !isRestricted(b)) ?? 0;
     setSelectedBid(first);
+    setDisplayedBid(first);
+    // Reset all dot widths
+    bidOptions.forEach((b, i) => {
+      dotWidthAnims[i]?.setValue(b === first ? 22 : 8);
+    });
   }, [visible, bidOptions]);
+
+  // Animate dot widths when selectedBid changes
+  useEffect(() => {
+    if (reduceMotion) {
+      bidOptions.forEach((b, i) => dotWidthAnims[i]?.setValue(b === selectedBid ? 22 : 8));
+      return;
+    }
+    bidOptions.forEach((b, i) => {
+      Animated.spring(dotWidthAnims[i], {
+        toValue: b === selectedBid ? 22 : 8,
+        friction: 7,
+        tension: 120,
+        useNativeDriver: false,
+      }).start();
+    });
+  }, [selectedBid, reduceMotion]);
 
   const haptic = async (kind: 'selection' | 'medium') => {
     try {
@@ -56,17 +90,57 @@ export default function BiddingModal({
     } catch { /* ignore */ }
   };
 
-  const change = async (delta: number) => {
+  const animatePressIn = (anim: Animated.Value) => {
+    Animated.spring(anim, { toValue: 0.88, friction: 4, tension: 300, useNativeDriver: true }).start();
+  };
+  const animatePressOut = (anim: Animated.Value) => {
+    Animated.spring(anim, { toValue: 1, friction: 4, tension: 200, useNativeDriver: true }).start();
+  };
+
+  const changeBid = async (delta: number) => {
     let next = selectedBid + delta;
     while (next >= 0 && next <= cardsThisRound && isRestricted(next)) next += delta;
     if (next >= 0 && next <= cardsThisRound && !isRestricted(next)) {
+      if (!reduceMotion) {
+        // Fade out → update → fade in
+        Animated.timing(numberFade, { toValue: 0, duration: 70, useNativeDriver: true }).start(() => {
+          setDisplayedBid(next);
+          Animated.timing(numberFade, { toValue: 1, duration: 100, useNativeDriver: true }).start();
+        });
+      } else {
+        setDisplayedBid(next);
+      }
       setSelectedBid(next);
       await haptic('selection');
+    } else {
+      // Flash restricted dots
+      if (!reduceMotion) {
+        Animated.sequence([
+          Animated.timing(restrictedFlash, { toValue: 0.25, duration: 100, useNativeDriver: true }),
+          Animated.timing(restrictedFlash, { toValue: 1,    duration: 200, useNativeDriver: true }),
+        ]).start();
+      }
     }
   };
 
   const handleDot = async (b: number) => {
-    if (isRestricted(b)) return;
+    if (isRestricted(b)) {
+      if (!reduceMotion) {
+        Animated.sequence([
+          Animated.timing(restrictedFlash, { toValue: 0.25, duration: 100, useNativeDriver: true }),
+          Animated.timing(restrictedFlash, { toValue: 1,    duration: 200, useNativeDriver: true }),
+        ]).start();
+      }
+      return;
+    }
+    if (!reduceMotion) {
+      Animated.timing(numberFade, { toValue: 0, duration: 70, useNativeDriver: true }).start(() => {
+        setDisplayedBid(b);
+        Animated.timing(numberFade, { toValue: 1, duration: 100, useNativeDriver: true }).start();
+      });
+    } else {
+      setDisplayedBid(b);
+    }
     setSelectedBid(b);
     await haptic('selection');
   };
@@ -118,45 +192,56 @@ export default function BiddingModal({
 
           {/* ── Giant number picker ──────────────────────── */}
           <View style={styles.pickerRow}>
-            <TouchableOpacity
-              testID="bid-decrease"
-              style={styles.arrowBtn}
-              onPress={() => change(-1)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.arrowText}>−</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ transform: [{ scale: decScaleAnim }] }}>
+              <TouchableOpacity
+                testID="bid-decrease"
+                style={styles.arrowBtn}
+                onPress={() => changeBid(-1)}
+                onPressIn={() => animatePressIn(decScaleAnim)}
+                onPressOut={() => animatePressOut(decScaleAnim)}
+                activeOpacity={1}
+              >
+                <Text style={styles.arrowText}>−</Text>
+              </TouchableOpacity>
+            </Animated.View>
 
             <View style={styles.numberWrap}>
-              <Text style={styles.bigNumber}>{selectedBid}</Text>
+              <Animated.Text style={[styles.bigNumber, { opacity: numberFade }]}>
+                {displayedBid}
+              </Animated.Text>
               <Text style={styles.outOf}>out of {cardsThisRound}</Text>
             </View>
 
-            <TouchableOpacity
-              testID="bid-increase"
-              style={styles.arrowBtn}
-              onPress={() => change(1)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.arrowText}>+</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ transform: [{ scale: incScaleAnim }] }}>
+              <TouchableOpacity
+                testID="bid-increase"
+                style={styles.arrowBtn}
+                onPress={() => changeBid(1)}
+                onPressIn={() => animatePressIn(incScaleAnim)}
+                onPressOut={() => animatePressOut(incScaleAnim)}
+                activeOpacity={1}
+              >
+                <Text style={styles.arrowText}>+</Text>
+              </TouchableOpacity>
+            </Animated.View>
           </View>
 
           {/* ── Dot indicators ───────────────────────────── */}
           <View style={styles.dotsRow}>
-            {bidOptions.map(b => (
+            {bidOptions.map((b, i) => (
               <TouchableOpacity
                 key={b}
                 testID={`bid-dot-${b}`}
                 onPress={() => handleDot(b)}
                 hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
               >
-                <View style={[
+                <Animated.View style={[
                   styles.dot,
-                  { width: b === selectedBid ? 22 : 8 },
+                  { width: dotWidthAnims[i] ?? 8 },
                   b === selectedBid ? styles.dotActive
-                    : isRestricted(b) ? styles.dotRestricted
-                    : styles.dotInactive,
+                    : isRestricted(b)
+                      ? [styles.dotRestricted, { opacity: restrictedFlash }]
+                      : styles.dotInactive,
                 ]} />
               </TouchableOpacity>
             ))}
