@@ -109,11 +109,11 @@ export default function BiddingModal({
 
           {/* ── Context chips ────────────────────────────── */}
           <Text style={styles.kicker}>Bidding Round</Text>
-          <Text style={styles.title}>How many tricks will you win?</Text>
+          <Text style={styles.title}>How many sets will you win?</Text>
           <View style={styles.chips}>
             <MetaChip label={`Round ${currentRound}/${totalRounds}`} />
             <MetaChip label={`${cardsThisRound} cards`} />
-            <MetaChip label={`${trumpSymbol} ${trumpSuit}`} color={trumpColor} />
+            <MetaChip label={`Trump ${trumpSymbol} ${trumpSuit}`} color={trumpColor} />
           </View>
 
           {/* ── Giant number picker ──────────────────────── */}

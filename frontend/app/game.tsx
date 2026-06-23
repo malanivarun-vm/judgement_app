@@ -310,7 +310,7 @@ export default function GameScreen() {
       }
       void fireHaptic('success');
       if (bidLockTimer.current) clearTimeout(bidLockTimer.current);
-      bidLockTimer.current = setTimeout(() => setShowBidLock(false), 2500);
+      bidLockTimer.current = setTimeout(() => setShowBidLock(false), 4000);
     }
 
     if ((prev === 'trump_selection' || prev === 'trump_selection_v3') && gameState.trump_suit) {
@@ -658,7 +658,7 @@ export default function GameScreen() {
               <StatusPill label="Trump" value={trumpSymbol || '—'} valueStyle={{ color: trumpColor }} />
               <StatusPill label="Round" value={`${gameState.current_round}/${gameState.total_rounds}`} />
               <StatusPill label="Cards" value={`${gameState.cards_this_round}`} />
-              <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
+              <StatusPill label="Sets Completed" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
               <StatusPill label="Total Bids" value={`${totalBids}`} />
               <StatusPill label={connected ? 'Live' : 'Offline'} value={connected ? 'Connected' : 'Retrying'} muted={!connected} />
             </View>
@@ -736,11 +736,11 @@ export default function GameScreen() {
             <View style={styles.trickTable}>
               <View style={styles.tableHeaderRow}>
                 <Text style={styles.tableHeaderLabel}>
-                  {phase === 'bidding' ? 'Bidding round' : 'Playing trick'}
+                  {phase === 'bidding' ? 'Bidding round' : 'Table'}
                 </Text>
-                <Text style={styles.tableHeaderBadge}>
-                  {gameState.current_player_index === your_index ? 'Your move' : 'Table live'}
-                </Text>
+                {gameState.current_player_index === your_index && (
+                  <Text style={styles.tableHeaderBadge}>Your move</Text>
+                )}
               </View>
 
               {trickResult && (
@@ -781,7 +781,7 @@ export default function GameScreen() {
               ) : (
                 <View style={styles.emptyTrick}>
                   <Text style={styles.emptyTrickLabel}>
-                    {phase === 'bidding' ? 'Bids are being locked in' : 'Play a card to open the trick'}
+                    {phase === 'bidding' ? 'Bids are being locked in' : 'Play a card to begin'}
                   </Text>
                 </View>
               )}
@@ -917,15 +917,15 @@ export default function GameScreen() {
               <View style={styles.bidLockPanel}>
                 <Text style={styles.bidLockTitle}>All bids locked!</Text>
                 <Text style={styles.bidLockTotal}>
-                  Total bids: {totalBids} / {gameState.cards_this_round} tricks
+                  Total bids: {totalBids} / {gameState.cards_this_round} sets
                 </Text>
                 <Text style={[styles.bidLockVerdict, { color: isTightGame ? COLORS.danger : COLORS.success }]}>
                   {isTightGame ? 'Tight game' : 'Loose game'}
                 </Text>
                 <Text style={styles.bidLockExplain}>
                   {isTightGame
-                    ? 'More bids than tricks available — someone has to fall short.'
-                    : 'Fewer bids than tricks — spare tricks are up for grabs.'}
+                    ? 'More bids than sets available — Someone will fall short. Make sure it is not you!'
+                    : 'Fewer bids than sets — Play smart and make others win the extra sets.'}
                 </Text>
               </View>
             </Animated.View>
