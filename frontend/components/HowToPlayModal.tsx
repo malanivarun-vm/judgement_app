@@ -11,13 +11,7 @@ import {
   AccessibilityInfo,
 } from 'react-native';
 import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
-
-const SCORE_ROWS = [
-  { label: 'Exact bid',            value: '+bid × 10 pts', positive: true },
-  { label: 'Miss bid',             value: '−bid × 10 pts', positive: false },
-  { label: 'Zero bid, 0 tricks',   value: '+25 pts',       positive: true },
-  { label: 'Zero bid, any tricks', value: '−25 pts',       positive: false },
-];
+import { SCORE_ROWS } from '../utils/variations';
 
 interface Props {
   visible: boolean;

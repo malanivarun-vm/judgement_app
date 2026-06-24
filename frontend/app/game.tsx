@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
+import { VARIATIONS } from '../utils/variations';
 import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
 import HandDisplay from '../components/HandDisplay';
@@ -61,13 +62,6 @@ interface GameState {
   variation_config: { cards_per_round?: number; total_rounds?: number };
   trump_caller_index: number;
 }
-
-const VARIATIONS = [
-  { key: 'v1', name: 'Classic', desc: 'Decreasing cards each round' },
-  { key: 'v1.1', name: 'Fixed Rounds', desc: 'Same cards every round' },
-  { key: 'v2', name: 'Trump Call', desc: 'Call trump after half the deal' },
-  { key: 'v3', name: 'Bid First', desc: 'Highest bidder picks trump' },
-];
 
 export default function GameScreen() {
   const params = useLocalSearchParams<{
