@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { COLORS } from '../../utils/theme';
 import { VARIATIONS } from '../../utils/variations';
 import { slides as classicSlides } from '../../components/mode-carousels/ClassicSlides';
 import { slides as fixedRoundsSlides } from '../../components/mode-carousels/FixedRoundsSlides';
