@@ -10,9 +10,10 @@ interface Props {
   onPress: () => void;
 }
 
-export default function ModeCard({ name, desc, isDefault, onPress }: Props) {
+export default function ModeCard({ name, desc, modeKey, isDefault, onPress }: Props) {
   return (
     <TouchableOpacity
+      testID={`mode-card-${modeKey}`}
       style={[styles.card, isDefault && styles.cardDefault]}
       onPress={onPress}
       activeOpacity={0.75}

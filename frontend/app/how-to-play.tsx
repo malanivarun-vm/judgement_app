@@ -82,9 +82,10 @@ export default function HowToPlayScreen() {
   }, [router]);
 
   const goToModes = useCallback(() => {
+    advance();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     router.push('/game-modes' as any);
-  }, [router]);
+  }, [advance, router]);
 
   const slide = SLIDES[current];
   const isLast = current === SLIDES.length - 1;

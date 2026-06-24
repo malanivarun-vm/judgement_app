@@ -27,6 +27,7 @@ export default function ModeCarouselScreen() {
 
   return (
     <SlideShell
+      headerLabel="GAME MODES"
       title={variation?.name ?? ''}
       heading={slide.heading}
       body={slide.body}

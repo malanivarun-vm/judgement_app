@@ -18,6 +18,7 @@ interface Props {
   isLast: boolean;
   isFirst: boolean;
   lockDone: boolean;
+  headerLabel?: string;
 }
 
 export default function SlideShell({
@@ -25,6 +26,7 @@ export default function SlideShell({
   totalSlides, currentSlide,
   onNext, onBack, onSkip, onDone,
   doneUnlocked, isLast, isFirst, lockDone,
+  headerLabel,
 }: Props) {
   const doneDisabled = lockDone && !doneUnlocked;
 
@@ -32,7 +34,7 @@ export default function SlideShell({
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerLabel}>HOW TO PLAY</Text>
+        <Text style={styles.headerLabel}>{headerLabel ?? 'HOW TO PLAY'}</Text>
         <TouchableOpacity onPress={onSkip} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Text style={styles.skipBtn}>Skip</Text>
         </TouchableOpacity>
