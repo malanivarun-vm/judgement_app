@@ -55,7 +55,7 @@ export default function SlideShell({
         <ProgressDots total={totalSlides} current={currentSlide} />
         <View style={styles.navRow}>
           {!isFirst && (
-            <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <TouchableOpacity style={styles.backBtn} onPress={onBack} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
               <Text style={styles.backBtnText}>← Back</Text>
             </TouchableOpacity>
           )}
@@ -64,13 +64,14 @@ export default function SlideShell({
               style={[styles.nextBtn, doneDisabled && styles.nextBtnDisabled]}
               onPress={doneDisabled ? undefined : onDone}
               disabled={doneDisabled}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
               <Text style={[styles.nextBtnText, doneDisabled && styles.nextBtnTextDisabled]}>
                 Done
               </Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={styles.nextBtn} onPress={onNext}>
+            <TouchableOpacity style={styles.nextBtn} onPress={onNext} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
               <Text style={styles.nextBtnText}>Next →</Text>
             </TouchableOpacity>
           )}
