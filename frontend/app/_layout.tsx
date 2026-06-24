@@ -35,6 +35,9 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="game" />
+        <Stack.Screen name="how-to-play" />
+        <Stack.Screen name="game-modes" />
+        <Stack.Screen name="game-modes/[modeKey]" />
       </Stack>
     </>
   );

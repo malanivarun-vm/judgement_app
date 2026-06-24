@@ -17,8 +17,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
-import HowToPlayModal from '../components/HowToPlayModal';
+import { HAS_SEEN_HOW_TO_PLAY_KEY } from '../utils/variations';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
@@ -33,9 +34,16 @@ export default function HomeScreen() {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [loading, setLoading] = useState(false);
-  const [howToPlayVisible, setHowToPlayVisible] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const floatAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    AsyncStorage.getItem(HAS_SEEN_HOW_TO_PLAY_KEY).then((val) => {
+      if (val !== 'true') {
+        router.push('/how-to-play');
+      }
+    });
+  }, []);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -270,7 +278,7 @@ export default function HomeScreen() {
           style={styles.howToPlayLink}
           onPress={async () => {
             await fireHaptic('selection');
-            setHowToPlayVisible(true);
+            router.push('/how-to-play');
           }}
           activeOpacity={0.7}
         >
@@ -281,10 +289,6 @@ export default function HomeScreen() {
         </TouchableOpacity>
         </View>
 
-        <HowToPlayModal
-          visible={howToPlayVisible}
-          onClose={() => setHowToPlayVisible(false)}
-        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
