@@ -449,6 +449,13 @@ export default function GameScreen() {
               <View style={styles.variationReadonly}>
                 <Text style={styles.variationName}>{selectedVariation.name}</Text>
                 <Text style={styles.variationDesc}>{selectedVariation.desc}</Text>
+                <TouchableOpacity
+                  onPress={() => router.push(`/game-modes/${variation}` as any)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={styles.modeInfoBtn}
+                >
+                  <Text style={styles.modeInfoText}>What's this? →</Text>
+                </TouchableOpacity>
               </View>
             )}
 
@@ -646,6 +653,14 @@ export default function GameScreen() {
           <View style={styles.statusRail}>
             <TouchableOpacity testID="leave-game-btn" onPress={handleLeave} style={styles.leaveButton}>
               <Text style={styles.leaveBtnText}>← Leave</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: '/how-to-play', params: { lockDone: 'false' } } as any)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={styles.helpBtn}
+            >
+              <Text style={styles.helpBtnText}>?</Text>
             </TouchableOpacity>
 
             <View style={styles.statusCluster}>
@@ -1388,6 +1403,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  helpBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpBtnText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   infoItem: {
     alignItems: 'center',
   },
@@ -1718,6 +1748,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
   },
+  modeInfoBtn: { marginTop: 6 },
+  modeInfoText: { color: COLORS.gold, fontSize: 12, fontWeight: '600' },
   configRows: {
     marginTop: 10,
     gap: 8,

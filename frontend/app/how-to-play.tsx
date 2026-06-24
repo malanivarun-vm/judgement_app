@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SlideShell from '../components/how-to-play/SlideShell';
 import IntroScene from '../components/how-to-play/scenes/IntroScene';
@@ -61,12 +61,10 @@ const SLIDES = [
   },
 ];
 
-interface Props {
-  lockDone?: boolean; // false when opened from in-game help
-}
-
-export default function HowToPlayScreen({ lockDone = true }: Props) {
+export default function HowToPlayScreen() {
   const router = useRouter();
+  const { lockDone: lockDoneParam } = useLocalSearchParams<{ lockDone?: string }>();
+  const lockDone = lockDoneParam !== 'false'; // true by default, false only when explicitly passed
   const [current, setCurrent] = useState(0);
   const [maxSeen, setMaxSeen] = useState(0);
 
