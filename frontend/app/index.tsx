@@ -158,121 +158,196 @@ export default function HomeScreen() {
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Decorative suit symbols */}
-        <Animated.View
-          style={[
-            styles.decoRow,
-            !reduceMotion && {
-              transform: [
+        {/* Hero wrapper - suits scatter behind title */}
+        <View style={styles.heroWrapper}>
+          {!reduceMotion ? (
+            <Animated.Text
+              style={[
+                styles.suitScatter,
+                styles.decoRed,
+                { top: 28, left: 16, fontSize: 50, opacity: 0.16 },
                 {
-                  translateY: floatAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, -6],
-                  }),
+                  transform: [
+                    {
+                      translateY: floatAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -7],
+                      }),
+                    },
+                  ],
                 },
-              ],
-              opacity: floatAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.74, 1],
-              }),
-            },
-          ]}
-        >
-          {Object.values(SUIT_SYMBOLS).map((s, i) => (
-            <Text key={i} style={[styles.decoSuit, i % 2 === 0 ? styles.decoRed : styles.decoWhite]}>
-              {s}
-            </Text>
-          ))}
-        </Animated.View>
-
-        <Animated.View
-          style={[
-            styles.heroPanel,
-            !reduceMotion && {
-              transform: [
-                {
-                  translateY: floatAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, -3],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <Text style={styles.kicker}>Live Card Table</Text>
-          <Text style={styles.title} adjustsFontSizeToFit numberOfLines={1}>Judgement</Text>
-          <Text style={styles.subtitle}>Bid the exact number of tricks. Win the table. Miss by one and pay for it.</Text>
-
-          <View style={styles.heroChips}>
-            <View style={styles.heroChip}><Text style={styles.heroChipText}>Real-time</Text></View>
-            <View style={styles.heroChip}><Text style={styles.heroChipText}>3-7 players</Text></View>
-            <View style={styles.heroChip}><Text style={styles.heroChipText}>Exact bids</Text></View>
-          </View>
-        </Animated.View>
-
-        {/* Player Name */}
-        <View style={styles.panel}>
-          <View style={styles.inputGroup}>
-          <Text style={styles.label}>Your Name</Text>
-          <TextInput
-            testID="player-name-input"
-            style={styles.input}
-            value={playerName}
-            onChangeText={setPlayerName}
-            placeholder="Enter your name"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            maxLength={16}
-            autoCapitalize="words"
-          />
-        </View>
-
-        {/* Create Room */}
-        <TouchableOpacity
-          testID="create-room-btn"
-          style={styles.goldButton}
-          onPress={createRoom}
-          disabled={loading}
-          activeOpacity={0.8}
-        >
-          {loading ? (
-            <ActivityIndicator color="#000" />
+              ]}
+            >
+              {SUIT_SYMBOLS.hearts}
+            </Animated.Text>
           ) : (
-            <Text style={styles.goldButtonText}>Create Room</Text>
+            <Text style={[styles.suitScatter, styles.decoRed, { top: 28, left: 16, fontSize: 50, opacity: 0.16 }]}>
+              {SUIT_SYMBOLS.hearts}
+            </Text>
           )}
-        </TouchableOpacity>
 
-        {/* Divider */}
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>OR</Text>
-          <View style={styles.dividerLine} />
+          {!reduceMotion ? (
+            <Animated.Text
+              style={[
+                styles.suitScatter,
+                styles.decoWhite,
+                { top: 12, left: 160, fontSize: 26, opacity: 0.1 },
+                {
+                  transform: [
+                    {
+                      translateY: floatAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -4],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              {SUIT_SYMBOLS.spades}
+            </Animated.Text>
+          ) : (
+            <Text style={[styles.suitScatter, styles.decoWhite, { top: 12, left: 160, fontSize: 26, opacity: 0.1 }]}>
+              {SUIT_SYMBOLS.spades}
+            </Text>
+          )}
+
+          {!reduceMotion ? (
+            <Animated.Text
+              style={[
+                styles.suitScatter,
+                styles.decoRed,
+                { top: 52, right: 18, fontSize: 40, opacity: 0.13 },
+                {
+                  transform: [
+                    {
+                      translateY: floatAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -9],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              {SUIT_SYMBOLS.diamonds}
+            </Animated.Text>
+          ) : (
+            <Text style={[styles.suitScatter, styles.decoRed, { top: 52, right: 18, fontSize: 40, opacity: 0.13 }]}>
+              {SUIT_SYMBOLS.diamonds}
+            </Text>
+          )}
+
+          {!reduceMotion ? (
+            <Animated.Text
+              style={[
+                styles.suitScatter,
+                styles.decoWhite,
+                { top: 118, right: 44, fontSize: 20, opacity: 0.08 },
+                {
+                  transform: [
+                    {
+                      translateY: floatAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -5],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              {SUIT_SYMBOLS.clubs}
+            </Animated.Text>
+          ) : (
+            <Text style={[styles.suitScatter, styles.decoWhite, { top: 118, right: 44, fontSize: 20, opacity: 0.08 }]}>
+              {SUIT_SYMBOLS.clubs}
+            </Text>
+          )}
+
+          <Animated.View
+            style={[
+              styles.heroPanel,
+              !reduceMotion && {
+                transform: [
+                  {
+                    translateY: floatAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, -3],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Text style={styles.title} adjustsFontSizeToFit numberOfLines={1}>Judgement</Text>
+            <Text style={styles.subtitle}>Call it. Own it.</Text>
+            <View style={styles.heroChips}>
+              <View style={styles.heroChip}><Text style={styles.heroChipText}>Real-time</Text></View>
+              <View style={styles.heroChip}><Text style={styles.heroChipText}>3–7 players</Text></View>
+            </View>
+          </Animated.View>
         </View>
 
-        {/* Join Room */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Room Code</Text>
-          <TextInput
-            testID="room-code-input"
-            style={styles.input}
-            value={roomCode}
-            onChangeText={(t) => setRoomCode(t.toUpperCase())}
-            placeholder="Enter 4-letter code"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            maxLength={4}
-            autoCapitalize="characters"
-          />
-        </View>
+        {/* Unified form */}
+        <View style={styles.formPanel}>
+          <View style={styles.nameBlock}>
+            <Text style={styles.label}>Your Name</Text>
+            <TextInput
+              testID="player-name-input"
+              style={styles.input}
+              value={playerName}
+              onChangeText={setPlayerName}
+              placeholder="Enter your name"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              maxLength={16}
+              autoCapitalize="words"
+            />
+          </View>
 
-        <TouchableOpacity
-          testID="join-room-btn"
-          style={styles.outlineButton}
-          onPress={joinRoom}
-          disabled={loading}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.outlineButtonText}>Join Room</Text>
-        </TouchableOpacity>
+          <View style={styles.actionRow}>
+            <View style={styles.actionCreate}>
+              <Text style={styles.sectionLabel}>Create a room</Text>
+              <TouchableOpacity
+                testID="create-room-btn"
+                style={styles.goldButton}
+                onPress={createRoom}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.goldButtonText}>Create Room</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.actionDivider} />
+
+            <View style={styles.actionJoin}>
+              <Text style={styles.sectionLabel}>Have a code?</Text>
+              <TextInput
+                testID="room-code-input"
+                style={[styles.input, styles.codeInput]}
+                value={roomCode}
+                onChangeText={(t) => setRoomCode(t.toUpperCase())}
+                placeholder="ABCD"
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                maxLength={4}
+                autoCapitalize="characters"
+              />
+              <TouchableOpacity
+                testID="join-room-btn"
+                style={styles.outlineButton}
+                onPress={joinRoom}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.outlineButtonText}>Join Room</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
         <TouchableOpacity
           style={styles.howToPlayLink}
@@ -287,8 +362,6 @@ export default function HomeScreen() {
             <Text style={styles.howToPlayAction}>How to Play →</Text>
           </Text>
         </TouchableOpacity>
-        </View>
-
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -306,35 +379,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  heroWrapper: {
+    width: '100%',
+    position: 'relative',
+    marginBottom: 8,
+  },
   heroPanel: {
     width: '100%',
     marginBottom: 18,
-    padding: 20,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: COLORS.borderAccent,
-    backgroundColor: COLORS.surfaceSolid,
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 4,
+    paddingHorizontal: 20,
+    paddingTop: 160,
+    paddingBottom: 20,
   },
-  kicker: {
-    color: COLORS.gold,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-  },
-  decoRow: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 8,
-  },
-  decoSuit: {
-    fontSize: 28,
-    opacity: 0.4,
+  suitScatter: {
+    position: 'absolute',
+    fontFamily: 'serif',
   },
   decoRed: {
     color: COLORS.suitRed,
@@ -344,23 +403,26 @@ const styles = StyleSheet.create({
   },
   title: {
     color: COLORS.goldLight,
-    fontSize: 42,
+    fontSize: 46,
     fontWeight: '900',
-    letterSpacing: 6,
+    letterSpacing: 3,
     marginBottom: 4,
+    textAlign: 'center',
   },
   subtitle: {
-    color: COLORS.textSecondary,
+    color: 'rgba(255,255,255,0.75)',
     fontSize: 14,
     lineHeight: 21,
     marginTop: 10,
     letterSpacing: 0.3,
+    textAlign: 'center',
   },
   heroChips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 14,
+    justifyContent: 'center',
   },
   heroChip: {
     paddingHorizontal: 11,
@@ -375,13 +437,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  panel: {
+  formPanel: {
     width: '100%',
-    padding: 18,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    backgroundColor: 'rgba(255,255,255,0.035)',
+    borderColor: 'rgba(212,175,55,0.15)',
+    backgroundColor: COLORS.surfaceSolid,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  nameBlock: {
+    padding: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
+  },
+  actionRow: {
+    flexDirection: 'row',
+  },
+  actionCreate: {
+    flex: 1,
+    padding: 14,
+    paddingBottom: 18,
+  },
+  actionJoin: {
+    flex: 1,
+    padding: 14,
+    paddingBottom: 18,
+  },
+  actionDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
   },
   inputGroup: {
     width: '100%',
@@ -406,18 +491,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+  sectionLabel: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  codeInput: {
+    textAlign: 'center',
+    letterSpacing: 5,
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
   goldButton: {
     backgroundColor: COLORS.gold,
-    paddingVertical: 16,
-    borderRadius: 28,
-    width: '100%',
+    paddingVertical: 14,
+    borderRadius: 20,
     alignItems: 'center',
-    marginTop: 8,
     shadowColor: COLORS.gold,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 4,
   },
   goldButtonText: {
     color: '#000',
@@ -425,31 +522,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1,
   },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    marginVertical: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.borderGlass,
-  },
-  dividerText: {
-    color: COLORS.textSecondary,
-    marginHorizontal: 12,
-    fontSize: 13,
-    fontWeight: '600',
-  },
   outlineButton: {
     borderWidth: 1.5,
-    borderColor: COLORS.goldLight,
-    paddingVertical: 14,
-    borderRadius: 28,
-    width: '100%',
+    borderColor: COLORS.gold,
+    paddingVertical: 13,
+    borderRadius: 20,
     alignItems: 'center',
-    marginTop: 8,
   },
   outlineButtonText: {
     color: COLORS.goldLight,
