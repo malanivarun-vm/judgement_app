@@ -3,10 +3,10 @@ import { View, Text, StyleSheet } from 'react-native';
 import { COLORS, SUIT_SYMBOLS } from '../../../utils/theme';
 
 const ROTATION = [
-  { sym: SUIT_SYMBOLS.hearts,   color: COLORS.suitRed,  label: 'Sn 1', active: false },
-  { sym: SUIT_SYMBOLS.spades,   color: COLORS.text,     label: 'Sn 2', active: true  },
-  { sym: SUIT_SYMBOLS.diamonds, color: COLORS.suitRed,  label: 'Sn 3', active: false },
-  { sym: SUIT_SYMBOLS.clubs,    color: COLORS.text,     label: 'Sn 4', active: false },
+  { sym: SUIT_SYMBOLS.hearts,   color: COLORS.suitRed,  label: 'Game 1', active: false },
+  { sym: SUIT_SYMBOLS.spades,   color: COLORS.text,     label: 'Game 2', active: true  },
+  { sym: SUIT_SYMBOLS.diamonds, color: COLORS.suitRed,  label: 'Game 3', active: false },
+  { sym: SUIT_SYMBOLS.clubs,    color: COLORS.text,     label: 'Game 4', active: false },
 ];
 
 export default function TrumpRotationScene() {
