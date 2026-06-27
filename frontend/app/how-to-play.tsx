@@ -3,10 +3,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SlideShell from '../components/how-to-play/SlideShell';
 import IntroScene from '../components/how-to-play/scenes/IntroScene';
-import GameStructureScene from '../components/how-to-play/scenes/GameStructureScene';
 import BidScene from '../components/how-to-play/scenes/BidScene';
 import CardRankScene from '../components/how-to-play/scenes/CardRankScene';
-import TrumpRotationScene from '../components/how-to-play/scenes/TrumpRotationScene';
 import TrickScene from '../components/how-to-play/scenes/TrickScene';
 import ScoreScene from '../components/how-to-play/scenes/ScoreScene';
 import QuickRefScene from '../components/how-to-play/scenes/QuickRefScene';
@@ -16,43 +14,43 @@ const SLIDES = [
   {
     title: "WHAT'S THE GOAL?",
     heading: "Predict exactly how many rounds you'll win.",
-    body: "Every player declares their prediction before play. Hit it exactly and you score. Miss it and you don't. The player with the most points at the end of the game wins.",
+    body: "Before each game, every player makes a prediction. Hit it exactly — you score. One too many or one too few — you lose points. The player with the most points at the end of the session wins.",
     scene: <IntroScene />,
   },
   {
-    title: 'HOW IS A GAME STRUCTURED?',
-    heading: 'Game → Sessions → Rounds.',
-    body: 'A game runs through multiple sessions. Each session deals a fixed number of cards — starting at the maximum, dropping by 1 each session down to 1. Inside each session everyone plays as many rounds as they have cards. If 52 doesn\'t divide evenly among players, the extra cards are set aside and not used.',
-    scene: <GameStructureScene />,
-  },
-  {
-    title: 'HOW DO I MAKE A PREDICTION?',
-    heading: "Before each session, predict how many rounds you'll win.",
-    body: "All players declare after seeing their cards. The goal is to match your prediction exactly — not exceed it, not fall short.",
-    scene: <BidScene />,
-  },
-  {
-    title: 'HOW DO CARDS RANK?',
-    heading: 'Ace is high. 2 is low.',
-    body: "A > K > Q > J > 10 > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2. Suit doesn't affect rank — except when trump changes everything.",
-    scene: <CardRankScene />,
-  },
-  {
-    title: 'WHAT IS THE TRUMP SUIT?',
-    heading: 'Trump beats every other suit.',
-    body: 'One suit is designated trump each session. Any trump card beats any non-trump card regardless of rank. In Classic mode trump rotates every session: ♥ → ♠ → ♦ → ♣.',
-    scene: <TrumpRotationScene />,
-  },
-  {
-    title: 'HOW DO I WIN A ROUND?',
-    heading: 'Lead any card. Follow suit if you can.',
-    body: "Can't follow suit? Play trump or any card. Highest trump wins. No trump played? Highest card of the lead suit wins.",
+    title: 'HOW DO YOU WIN A ROUND?',
+    heading: 'Play a card. Highest card wins.',
+    body: "One player leads with any card. Everyone else plays one card each. The highest card takes all the cards played. That's one round — you'll play as many rounds as you have cards in your hand.",
     scene: <TrickScene />,
   },
   {
-    title: 'HOW DOES SCORING WORK?',
-    heading: 'Exact predictions score. Misses punish.',
-    body: 'Hit your prediction exactly — earn points. Miss — lose points. Predict zero and take no rounds for a big bonus.',
+    title: 'WHICH CARD IS HIGHEST?',
+    heading: 'Ace is highest. 2 is lowest.',
+    body: "A > K > Q > J > 10 > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2. Suit doesn't change rank — unless trump is in play.",
+    scene: <CardRankScene />,
+  },
+  {
+    title: 'WHAT IS TRUMP?',
+    heading: 'One suit that beats everything else.',
+    body: "Every game has a trump suit. Any trump card beats any non-trump card — a 2 of trump beats an Ace of any other suit. No trump played? Highest card of the suit that was led wins.",
+    scene: undefined,
+  },
+  {
+    title: 'HOW DO I PREDICT?',
+    heading: "Look at your cards. Then call your number.",
+    body: "After cards are dealt, every player says how many rounds they think they'll win. Strong cards and good trump mean a higher prediction. The skill is reading your hand and landing exactly on your number — not one more, not one less.",
+    scene: <BidScene />,
+  },
+  {
+    title: 'ONE SPECIAL RULE',
+    heading: "The dealer can't let everyone break even.",
+    body: "The dealer predicts last. They're blocked from any number that would make all predictions add up to exactly the number of rounds in the game. At least one player is always wrong.",
+    scene: undefined,
+  },
+  {
+    title: 'HOW DO POINTS WORK?',
+    heading: 'Exact prediction = points. Wrong prediction = penalty.',
+    body: 'Nail your prediction → earn points. Miss → lose points. Predict zero and win zero rounds → big bonus. Predict zero and win even one → big penalty.',
     scene: <ScoreScene />,
   },
   {
@@ -63,7 +61,7 @@ const SLIDES = [
   },
   {
     title: "YOU'RE READY",
-    heading: 'Four ways to play Judgement.',
+    heading: 'How do you want to play?',
     body: 'The host picks a mode before the game starts. Tap below to explore what makes each one different.',
     scene: undefined,
   },
