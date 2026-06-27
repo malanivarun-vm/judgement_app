@@ -36,7 +36,7 @@ export default function ModeCarouselScreen() {
       currentSlide={current}
       onNext={() => setCurrent((c) => c + 1)}
       onBack={() => setCurrent((c) => Math.max(0, c - 1))}
-      onSkip={() => router.back()}
+      onSkip={() => router.push('/game-modes' as any)}
       onDone={() => router.push('/')}
       doneLabel="Let's Play →"
       doneUnlocked={true}
