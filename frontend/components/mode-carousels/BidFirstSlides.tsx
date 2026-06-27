@@ -90,21 +90,21 @@ const styles = StyleSheet.create({
 
 export const slides: ModeSlide[] = [
   {
-    title: 'Bid First',
-    heading: 'Cards are dealt in two batches.',
-    body: 'Same two-batch deal as Trump Call. You see the first half of your hand before trump is set.',
-    scene: undefined,
-  },
-  {
-    title: 'Bid First',
-    heading: 'Everyone predicts before trump is decided.',
-    body: "You're predicting blind — trump is unknown when you make your prediction. No one knows which suit will dominate.",
+    title: 'HOW CARDS ARE DEALT',
+    heading: "You get your full hand before anyone predicts.",
+    body: "All cards are dealt upfront. Then every player makes their prediction — but trump hasn't been decided yet. You're predicting blind: you can see your cards but don't know which suit will dominate.",
     scene: <BlindBidScene />,
   },
   {
-    title: 'Bid First',
-    heading: 'The highest prediction picks trump.',
-    body: 'After all predictions are locked, the player with the highest prediction selects the trump suit. Then the second batch of cards is dealt and play begins.',
+    title: 'WHO DECIDES TRUMP',
+    heading: 'The player with the highest prediction picks trump.',
+    body: "After everyone has predicted, the highest prediction wins the right to call trump. They pick the suit that suits their hand. If two players predict the same number, the one who predicted first gets to choose.",
     scene: <WinnerPicksScene />,
+  },
+  {
+    title: 'THEN PLAY BEGINS',
+    heading: 'Trump locked in. Play starts immediately.',
+    body: "Once trump is set, play begins — no second deal, no waiting. Everyone plays to hit the number they predicted blind. Scoring, card ranking, and the dealer rule are all the same as Classic.",
+    scene: undefined,
   },
 ];
