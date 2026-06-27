@@ -68,21 +68,21 @@ const styles = StyleSheet.create({
 
 export const slides: ModeSlide[] = [
   {
-    title: 'Trump Call',
-    heading: 'Cards are dealt in two batches.',
-    body: 'You receive the first half of your hand, then a trump call happens — before the second half is dealt.',
+    title: 'HOW CARDS ARE DEALT',
+    heading: 'Your hand arrives in two batches.',
+    body: "You get the first half of your cards. Then trump is called. Then the second half is dealt. You won't have your full hand when trump is decided.",
     scene: <TwoBatchScene />,
   },
   {
-    title: 'Trump Call',
-    heading: 'The player left of the dealer calls trump.',
-    body: 'They pick a suit after seeing only the first batch of cards — before their full hand is known. High risk, high information.',
+    title: 'WHO CALLS TRUMP',
+    heading: 'The player left of the dealer picks the trump suit.',
+    body: "They choose after seeing only the first batch — not their full hand. If they can't make a call, a card is drawn at random from the un-dealt second half and its suit becomes trump.",
     scene: <TrumpCallScene />,
   },
   {
-    title: 'Trump Call',
-    heading: 'Then the second batch arrives and bidding begins.',
-    body: 'After trump is called, the rest of your hand is dealt. Bidding and play proceed exactly as in Classic.',
+    title: 'THEN PLAY BEGINS',
+    heading: 'Second batch dealt. Everyone predicts. Play starts.',
+    body: "After trump is called, the rest of the cards arrive. Then everyone makes their prediction in the usual order — dealer last, blocked from letting totals equal rounds. Scoring, card ranking, and the dealer rule are all the same as Classic.",
     scene: undefined,
   },
 ];
