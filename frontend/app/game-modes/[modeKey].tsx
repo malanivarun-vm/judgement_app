@@ -37,7 +37,8 @@ export default function ModeCarouselScreen() {
       onNext={() => setCurrent((c) => c + 1)}
       onBack={() => setCurrent((c) => Math.max(0, c - 1))}
       onSkip={() => router.back()}
-      onDone={() => router.back()}
+      onDone={() => router.push('/')}
+      doneLabel="Let's Play →"
       doneUnlocked={true}
       isLast={isLast}
       isFirst={current === 0}
