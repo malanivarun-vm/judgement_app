@@ -32,7 +32,7 @@ function BlindBidScene() {
 function WinnerPicksScene() {
   return (
     <View style={styles.winnerContainer}>
-      <Text style={styles.winnerLabel}>Highest bidder picks trump</Text>
+      <Text style={styles.winnerLabel}>Highest prediction picks trump</Text>
       <View style={styles.suitRow}>
         {(['hearts','spades','diamonds','clubs'] as const).map((s) => (
           <View key={s} style={[styles.suitOption, s === 'spades' && styles.suitSelected]}>
@@ -42,7 +42,7 @@ function WinnerPicksScene() {
           </View>
         ))}
       </View>
-      <Text style={styles.winnerNote}>Sam bid 4 — Sam picks</Text>
+      <Text style={styles.winnerNote}>Sam predicted 4 — Sam picks</Text>
     </View>
   );
 }
@@ -97,14 +97,14 @@ export const slides: ModeSlide[] = [
   },
   {
     title: 'Bid First',
-    heading: 'Everyone bids before trump is decided.',
-    body: "You're bidding blind — trump is unknown when you place your bid. No one knows which suit will dominate.",
+    heading: 'Everyone predicts before trump is decided.',
+    body: "You're predicting blind — trump is unknown when you make your prediction. No one knows which suit will dominate.",
     scene: <BlindBidScene />,
   },
   {
     title: 'Bid First',
-    heading: 'The highest bidder picks trump.',
-    body: 'After all bids are locked, the player with the highest bid selects the trump suit. Then the second batch of cards is dealt and play begins.',
+    heading: 'The highest prediction picks trump.',
+    body: 'After all predictions are locked, the player with the highest prediction selects the trump suit. Then the second batch of cards is dealt and play begins.',
     scene: <WinnerPicksScene />,
   },
 ];

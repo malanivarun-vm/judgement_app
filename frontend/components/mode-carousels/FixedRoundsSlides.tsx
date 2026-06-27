@@ -43,14 +43,14 @@ const styles = StyleSheet.create({
 export const slides: ModeSlide[] = [
   {
     title: 'Fixed Rounds',
-    heading: 'The host sets the card count and round count.',
-    body: 'Unlike Classic, the number of cards per round stays constant throughout the game. Good for shorter or custom-length sessions.',
+    heading: 'The host sets the card count and session count.',
+    body: 'Unlike Classic, the number of cards per session stays constant throughout the game. Good for shorter or custom-length games.',
     scene: <ConfigScene />,
   },
   {
     title: 'Fixed Rounds',
     heading: 'Everything else is identical to Classic.',
-    body: 'Same bidding rules, same trump rotation (♥ → ♠ → ♦ → ♣), same scoring. Only the deal structure changes.',
+    body: 'Same prediction rules, same trump rotation (♥ → ♠ → ♦ → ♣), same scoring. Only the deal structure changes.',
     scene: undefined,
   },
 ];

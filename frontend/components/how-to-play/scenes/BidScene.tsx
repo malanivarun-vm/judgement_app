@@ -8,7 +8,7 @@ const SELECTED = 2;
 export default function BidScene() {
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>How many tricks will you win?</Text>
+      <Text style={styles.label}>How many rounds will you win?</Text>
       <View style={styles.row}>
         {BIDS.map((n) => (
           <View key={n} style={[styles.bid, n === SELECTED && styles.bidSelected]}>
