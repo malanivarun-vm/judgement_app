@@ -8,12 +8,12 @@ function ConfigScene() {
     <View style={styles.container}>
       <View style={styles.row}>
         <View style={styles.item}>
-          <Text style={styles.label}>Cards / Session</Text>
+          <Text style={styles.label}>Cards / Game</Text>
           <Text style={styles.value}>10</Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.item}>
-          <Text style={styles.label}>Total Sessions</Text>
+          <Text style={styles.label}>Total Games</Text>
           <Text style={styles.value}>8</Text>
         </View>
       </View>
@@ -42,15 +42,15 @@ const styles = StyleSheet.create({
 
 export const slides: ModeSlide[] = [
   {
-    title: 'Fixed Rounds',
-    heading: 'The host sets the card count and session count.',
-    body: 'Unlike Classic, the number of cards per session stays constant throughout the game. Good for shorter or custom-length games.',
+    title: "WHAT'S DIFFERENT",
+    heading: 'The host sets the card count. It never changes.',
+    body: "Before the session starts, the host picks how many cards each player gets per game and how many games to play. That count stays fixed — no reducing. Good for shorter sessions or custom formats.",
     scene: <ConfigScene />,
   },
   {
-    title: 'Fixed Rounds',
-    heading: 'Everything else is identical to Classic.',
-    body: 'Same prediction rules, same trump rotation (♥ → ♠ → ♦ → ♣), same scoring. Only the deal structure changes.',
+    title: 'EVERYTHING ELSE',
+    heading: 'Predictions, trump, scoring — all identical to Classic.',
+    body: 'Trump still rotates ♥ → ♠ → ♦ → ♣ each game. Predictions work the same way. The dealer rule applies. Scoring is unchanged. Only the deal structure is different.',
     scene: undefined,
   },
 ];
