@@ -56,12 +56,6 @@ const SLIDES = [
     scene: <ScoreScene />,
   },
   {
-    title: 'WHAT SPECIAL RULES SHOULD I KNOW?',
-    heading: "The dealer can't let everyone break even.",
-    body: "The dealer predicts last and is blocked from any number that would make total predictions equal the rounds in that session. Someone has to be wrong.",
-    scene: undefined,
-  },
-  {
     title: 'QUICK REFERENCE',
     heading: 'Keep this handy.',
     body: '',
@@ -102,7 +96,7 @@ export default function HowToPlayScreen() {
   }, [router]);
 
   const slide = SLIDES[current];
-  const isModeSlide = current === 9;
+  const isModeSlide = current === 8;
   // Suppress Done button on the mode slide so "Next →" fires goToModes instead.
   const isLast = current === SLIDES.length - 1 && !isModeSlide;
 
