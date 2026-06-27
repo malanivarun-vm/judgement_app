@@ -6,11 +6,11 @@ export default function GameStructureScene() {
   return (
     <View style={styles.container}>
       <View style={[styles.box, styles.gameBox]}>
-        <Text style={styles.gameLabel}>GAME</Text>
+        <Text style={styles.gameLabel}>SESSION</Text>
       </View>
       <Text style={styles.connector}>↓</Text>
       <View style={styles.row}>
-        {['Sn 1', 'Sn 2', 'Sn 3', '…'].map((label) => (
+        {['Game 1', 'Game 2', 'Game 3', '…'].map((label) => (
           <View key={label} style={[styles.box, styles.sessionBox]}>
             <Text style={styles.sessionLabel}>{label}</Text>
           </View>
@@ -18,7 +18,7 @@ export default function GameStructureScene() {
       </View>
       <Text style={styles.connector}>↓</Text>
       <View style={styles.row}>
-        {['R1', 'R2', 'R3', '…'].map((label) => (
+        {['Rd 1', 'Rd 2', 'Rd 3', '…'].map((label) => (
           <View key={label} style={[styles.box, styles.roundBox]}>
             <Text style={styles.roundLabel}>{label}</Text>
           </View>
