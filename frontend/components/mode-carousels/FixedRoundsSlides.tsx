@@ -44,7 +44,7 @@ export const slides: ModeSlide[] = [
   {
     title: "WHAT'S DIFFERENT",
     heading: 'The host sets the card count. It never changes.',
-    body: "Before the session starts, the host picks how many cards each player gets per game and how many games to play. That count stays fixed — no reducing. Good for shorter sessions or custom formats.",
+    body: "Before the session starts, the host picks how many cards each player gets per game and how many games to play. That count stays fixed — no reducing. Good for shorter formats or custom play.",
     scene: <ConfigScene />,
   },
   {
