@@ -3,60 +3,74 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SlideShell from '../components/how-to-play/SlideShell';
 import IntroScene from '../components/how-to-play/scenes/IntroScene';
-import HandScene from '../components/how-to-play/scenes/HandScene';
+import GameStructureScene from '../components/how-to-play/scenes/GameStructureScene';
+import BidScene from '../components/how-to-play/scenes/BidScene';
+import CardRankScene from '../components/how-to-play/scenes/CardRankScene';
 import TrumpRotationScene from '../components/how-to-play/scenes/TrumpRotationScene';
 import TrickScene from '../components/how-to-play/scenes/TrickScene';
-import BidScene from '../components/how-to-play/scenes/BidScene';
 import ScoreScene from '../components/how-to-play/scenes/ScoreScene';
+import QuickRefScene from '../components/how-to-play/scenes/QuickRefScene';
 import { HAS_SEEN_HOW_TO_PLAY_KEY } from '../utils/variations';
 
 const SLIDES = [
   {
-    title: 'Judgement / Oh Hell',
-    heading: 'Bid the exact number of tricks you will take.',
-    body: 'Every round is a prediction game. Exact bids score. Misses punish.',
+    title: "WHAT'S THE GOAL?",
+    heading: "Predict exactly how many rounds you'll win.",
+    body: "Every player declares their prediction before play. Hit it exactly and you score. Miss it and you don't. The player with the most points at the end of the game wins.",
     scene: <IntroScene />,
   },
   {
-    title: 'The Deal',
-    heading: 'You get a hand of cards each round.',
-    body: 'Cards dealt = floor(52 ÷ players). The count drops by 1 every round, down to 1-card rounds.',
-    scene: <HandScene />,
+    title: 'HOW IS A GAME STRUCTURED?',
+    heading: 'Game → Sessions → Rounds.',
+    body: 'A game runs through multiple sessions. Each session deals a fixed number of cards — starting at the maximum, dropping by 1 each session down to 1. Inside each session everyone plays as many rounds as they have cards. If 52 doesn\'t divide evenly among players, the extra cards are set aside and not used.',
+    scene: <GameStructureScene />,
   },
   {
-    title: 'Trump Suits',
-    heading: 'Trump rotates every round.',
-    body: 'Trump beats any non-trump card. ♥ → ♠ → ♦ → ♣, cycling each round.',
-    scene: <TrumpRotationScene />,
-  },
-  {
-    title: 'Playing a Trick',
-    heading: 'Lead any card. Follow suit if you can.',
-    body: "If you can't follow suit, play trump or any card. Highest trump wins; otherwise highest card of the lead suit wins.",
-    scene: <TrickScene />,
-  },
-  {
-    title: 'Bidding',
-    heading: 'Predict exactly how many tricks you will win.',
-    body: 'Bid clockwise after the deal. The dealer bids last and cannot bid a number that makes total bids equal tricks available.',
+    title: 'HOW DO I MAKE A PREDICTION?',
+    heading: "Before each session, predict how many rounds you'll win.",
+    body: "All players declare after seeing their cards. The goal is to match your prediction exactly — not exceed it, not fall short.",
     scene: <BidScene />,
   },
   {
-    title: 'Scoring',
-    heading: 'Exact bids win. Misses punish.',
-    body: 'Zero bids are high-risk, high-reward. One trick when you bid zero costs you 25 points.',
+    title: 'HOW DO CARDS RANK?',
+    heading: 'Ace is high. 2 is low.',
+    body: "A > K > Q > J > 10 > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2. Suit doesn't affect rank — except when trump changes everything.",
+    scene: <CardRankScene />,
+  },
+  {
+    title: 'WHAT IS THE TRUMP SUIT?',
+    heading: 'Trump beats every other suit.',
+    body: 'One suit is designated trump each session. Any trump card beats any non-trump card regardless of rank. In Classic mode trump rotates every session: ♥ → ♠ → ♦ → ♣.',
+    scene: <TrumpRotationScene />,
+  },
+  {
+    title: 'HOW DO I WIN A ROUND?',
+    heading: 'Lead any card. Follow suit if you can.',
+    body: "Can't follow suit? Play trump or any card. Highest trump wins. No trump played? Highest card of the lead suit wins.",
+    scene: <TrickScene />,
+  },
+  {
+    title: 'HOW DOES SCORING WORK?',
+    heading: 'Exact predictions score. Misses punish.',
+    body: 'Hit your prediction exactly — earn points. Miss — lose points. Predict zero and take no rounds for a big bonus.',
     scene: <ScoreScene />,
   },
   {
-    title: 'Game Modes',
-    heading: 'Four ways to play Judgement.',
-    body: 'The host picks a mode before the game starts. Tap below to explore what makes each one different.',
+    title: 'WHAT SPECIAL RULES SHOULD I KNOW?',
+    heading: "The dealer can't let everyone break even.",
+    body: "The dealer predicts last and is blocked from any number that would make total predictions equal the rounds in that session. Someone has to be wrong.",
     scene: undefined,
   },
   {
-    title: "You're Ready",
-    heading: "Time to play.",
-    body: 'Bid precisely. Play smart. The table is waiting.',
+    title: 'QUICK REFERENCE',
+    heading: 'Keep this handy.',
+    body: '',
+    scene: <QuickRefScene />,
+  },
+  {
+    title: "YOU'RE READY",
+    heading: 'Four ways to play Judgement.',
+    body: 'The host picks a mode before the game starts. Tap below to explore what makes each one different.',
     scene: undefined,
   },
 ];
@@ -64,7 +78,7 @@ const SLIDES = [
 export default function HowToPlayScreen() {
   const router = useRouter();
   const { lockDone: lockDoneParam } = useLocalSearchParams<{ lockDone?: string }>();
-  const lockDone = lockDoneParam !== 'false'; // true by default, false only when explicitly passed
+  const lockDone = lockDoneParam !== 'false';
   const [current, setCurrent] = useState(0);
   const [maxSeen, setMaxSeen] = useState(0);
 
@@ -88,16 +102,15 @@ export default function HowToPlayScreen() {
   }, [advance, router]);
 
   const slide = SLIDES[current];
-  const isLast = current === SLIDES.length - 1;
-  const isModeSlide = current === 6;
+  const isModeSlide = current === 9;
+  // Suppress Done button on the mode slide so "Next →" fires goToModes instead.
+  const isLast = current === SLIDES.length - 1 && !isModeSlide;
 
   return (
     <SlideShell
       title={slide.title}
       heading={slide.heading}
-      body={isModeSlide
-        ? slide.body + (isModeSlide ? '' : '')
-        : slide.body}
+      body={slide.body}
       scene={slide.scene}
       totalSlides={SLIDES.length}
       currentSlide={current}
