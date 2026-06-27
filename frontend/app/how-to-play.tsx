@@ -95,7 +95,8 @@ export default function HowToPlayScreen() {
     router.back();
   }, [router]);
 
-  const goToModes = useCallback(() => {
+  const goToModes = useCallback(async () => {
+    await AsyncStorage.setItem(HAS_SEEN_HOW_TO_PLAY_KEY, 'true');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     router.push('/game-modes' as any);
   }, [router]);

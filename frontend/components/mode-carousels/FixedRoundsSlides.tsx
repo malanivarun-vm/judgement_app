@@ -8,12 +8,12 @@ function ConfigScene() {
     <View style={styles.container}>
       <View style={styles.row}>
         <View style={styles.item}>
-          <Text style={styles.label}>Cards / Round</Text>
+          <Text style={styles.label}>Cards / Session</Text>
           <Text style={styles.value}>10</Text>
         </View>
         <View style={styles.divider} />
         <View style={styles.item}>
-          <Text style={styles.label}>Total Rounds</Text>
+          <Text style={styles.label}>Total Sessions</Text>
           <Text style={styles.value}>8</Text>
         </View>
       </View>
