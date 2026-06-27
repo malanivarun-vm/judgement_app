@@ -19,6 +19,7 @@ interface Props {
   isFirst: boolean;
   lockDone: boolean;
   headerLabel?: string;
+  doneLabel?: string;
 }
 
 export default function SlideShell({
@@ -27,6 +28,7 @@ export default function SlideShell({
   onNext, onBack, onSkip, onDone,
   doneUnlocked, isLast, isFirst, lockDone,
   headerLabel,
+  doneLabel = 'Done',
 }: Props) {
   const doneDisabled = lockDone && !doneUnlocked;
 
@@ -69,7 +71,7 @@ export default function SlideShell({
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
               <Text style={[styles.nextBtnText, doneDisabled && styles.nextBtnTextDisabled]}>
-                Done
+                {doneLabel}
               </Text>
             </TouchableOpacity>
           ) : (
