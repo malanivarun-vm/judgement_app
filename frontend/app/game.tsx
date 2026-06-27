@@ -500,6 +500,17 @@ export default function GameScreen() {
             <Text style={styles.waitText}>Waiting for host to start...</Text>
           )}
 
+          <TouchableOpacity
+            style={styles.howToPlayLobbyLink}
+            onPress={() => router.push('/how-to-play?lockDone=false' as any)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.howToPlayLobbyText}>
+              New here?{'  '}
+              <Text style={styles.howToPlayLobbyAction}>How to Play →</Text>
+            </Text>
+          </TouchableOpacity>
+
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </ScrollView>
       </SafeAreaView>
@@ -1969,5 +1980,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     lineHeight: 17,
+  },
+  howToPlayLobbyLink: {
+    marginTop: 16,
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  howToPlayLobbyText: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  howToPlayLobbyAction: {
+    color: 'rgba(212,175,55,0.8)',
+    fontWeight: '600',
   },
 });
