@@ -2,13 +2,14 @@ import React, { useState, useCallback } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SlideShell from '../components/how-to-play/SlideShell';
+import ModeCard from '../components/ModeCard';
 import IntroScene from '../components/how-to-play/scenes/IntroScene';
 import BidScene from '../components/how-to-play/scenes/BidScene';
 import CardRankScene from '../components/how-to-play/scenes/CardRankScene';
 import TrickScene from '../components/how-to-play/scenes/TrickScene';
 import ScoreScene from '../components/how-to-play/scenes/ScoreScene';
 import QuickRefScene from '../components/how-to-play/scenes/QuickRefScene';
-import { HAS_SEEN_HOW_TO_PLAY_KEY } from '../utils/variations';
+import { HAS_SEEN_HOW_TO_PLAY_KEY, VARIATIONS } from '../utils/variations';
 
 const SLIDES = [
   {
@@ -61,8 +62,8 @@ const SLIDES = [
   },
   {
     title: "YOU'RE READY",
-    heading: 'How do you want to play?',
-    body: 'The host picks a mode before the game starts. Tap below to explore what makes each one different.',
+    heading: 'Four ways to play Judgement.',
+    body: 'The host picks a mode before the game starts. Tap any mode to learn what makes it different.',
     scene: undefined,
   },
 ];
@@ -87,16 +88,22 @@ export default function HowToPlayScreen() {
     router.back();
   }, [router]);
 
-  const goToModes = useCallback(async () => {
-    await AsyncStorage.setItem(HAS_SEEN_HOW_TO_PLAY_KEY, 'true');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    router.push('/game-modes' as any);
-  }, [router]);
-
   const slide = SLIDES[current];
-  const isModeSlide = current === 8;
-  // Suppress Done button on the mode slide so "Next →" fires goToModes instead.
-  const isLast = current === SLIDES.length - 1 && !isModeSlide;
+  const isLast = current === SLIDES.length - 1;
+
+  const modeCards = isLast
+    ? VARIATIONS.map((v) => (
+        <ModeCard
+          key={v.key}
+          modeKey={v.key}
+          name={v.name}
+          desc={v.desc}
+          isDefault={v.key === 'v1'}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onPress={() => router.push(`/game-modes/${v.key}` as any)}
+        />
+      ))
+    : null;
 
   return (
     <SlideShell
@@ -106,14 +113,17 @@ export default function HowToPlayScreen() {
       scene={slide.scene}
       totalSlides={SLIDES.length}
       currentSlide={current}
-      onNext={isModeSlide ? goToModes : advance}
+      onNext={advance}
       onBack={back}
       onSkip={exit}
       onDone={exit}
+      doneLabel="Let's Play →"
       doneUnlocked={maxSeen >= SLIDES.length - 1}
       isLast={isLast}
       isFirst={current === 0}
       lockDone={lockDone}
-    />
+    >
+      {modeCards}
+    </SlideShell>
   );
 }

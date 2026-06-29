@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView } from 'react-native';
 import { COLORS } from '../../utils/theme';
 import ProgressDots from './ProgressDots';
 
@@ -8,6 +8,7 @@ interface Props {
   heading: string;
   body: string;
   scene?: React.ReactNode;
+  children?: React.ReactNode;
   totalSlides: number;
   currentSlide: number;
   onNext: () => void;
@@ -23,7 +24,7 @@ interface Props {
 }
 
 export default function SlideShell({
-  title, heading, body, scene,
+  title, heading, body, scene, children,
   totalSlides, currentSlide,
   onNext, onBack, onSkip, onDone,
   doneUnlocked, isLast, isFirst, lockDone,
@@ -48,11 +49,20 @@ export default function SlideShell({
       )}
 
       {/* Text content */}
-      <View style={styles.textBlock}>
-        <Text style={styles.kicker}>{title}</Text>
-        <Text style={styles.heading}>{heading}</Text>
-        <Text style={styles.body}>{body}</Text>
-      </View>
+      {children ? (
+        <ScrollView style={styles.textBlock} contentContainerStyle={styles.textBlockScroll} showsVerticalScrollIndicator={false}>
+          <Text style={styles.kicker}>{title}</Text>
+          <Text style={styles.heading}>{heading}</Text>
+          {!!body && <Text style={styles.body}>{body}</Text>}
+          <View style={styles.childrenBlock}>{children}</View>
+        </ScrollView>
+      ) : (
+        <View style={styles.textBlock}>
+          <Text style={styles.kicker}>{title}</Text>
+          <Text style={styles.heading}>{heading}</Text>
+          <Text style={styles.body}>{body}</Text>
+        </View>
+      )}
 
       {/* Footer */}
       <View style={styles.footer}>
@@ -122,6 +132,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     flex: 1,
+  },
+  textBlockScroll: {
+    paddingBottom: 8,
+  },
+  childrenBlock: {
+    marginTop: 16,
   },
   kicker: {
     color: COLORS.gold,
