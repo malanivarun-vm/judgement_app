@@ -46,7 +46,7 @@ Backend is deployed on Railway and the frontend on Vercel with `vercel.json` SPA
 - `buildShareMessage(roomCode: string, origin: string): string`
 - `parseRoomCodeParam(raw: unknown): string | null` — validates/normalizes the query param.
 
-Location: `frontend/utils/share.ts` (or nearest existing utils convention).
+Location: `frontend/utils/share.ts` (alongside existing `utils/theme.ts` and `utils/variations.ts`).
 
 ## Testing
 - Unit tests for both helpers via `node --test` + tsx (project convention): message format, origin injection, param validation (lowercase, wrong length, arrays, undefined).
