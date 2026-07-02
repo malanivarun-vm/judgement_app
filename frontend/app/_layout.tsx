@@ -1,6 +1,8 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Text, TextInput } from 'react-native';
+import { useEffect } from 'react';
+import { Platform, Text, TextInput } from 'react-native';
+import InstallBanner from '../components/InstallBanner';
 import {
   useFonts,
   Outfit_900Black,
@@ -27,6 +29,12 @@ export default function RootLayout() {
     JetBrainsMono_700Bold,
   });
 
+  useEffect(() => {
+    if (Platform.OS === 'web' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  }, []);
+
   if (!fontsLoaded) return null;
 
   return (
@@ -39,6 +47,7 @@ export default function RootLayout() {
         <Stack.Screen name="game-modes" />
         <Stack.Screen name="game-modes/[modeKey]" />
       </Stack>
+      <InstallBanner />
     </>
   );
 }
