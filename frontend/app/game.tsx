@@ -12,7 +12,6 @@ import {
   AccessibilityInfo,
   Platform,
   StatusBar,
-  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -96,7 +95,6 @@ export default function GameScreen() {
   const turnPulse = useRef(new Animated.Value(0)).current;
   const trickPop = useRef(new Animated.Value(0)).current;
   const reduceMotionRef = useRef(false);
-  const { width: SCREEN_W } = useWindowDimensions();
   const [nowTick, setNowTick] = useState(0);
   const stateReceivedAt = useRef(Date.now());
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
