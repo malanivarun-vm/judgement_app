@@ -692,13 +692,30 @@ export default function GameScreen() {
               <Text style={styles.helpBtnText}>?</Text>
             </TouchableOpacity>
 
+            <View
+              testID="connection-dot"
+              accessibilityLabel={connected ? 'Connected' : 'Reconnecting'}
+              style={[styles.connDot, { backgroundColor: connected ? COLORS.success : COLORS.danger }]}
+            />
+
             <View style={styles.statusCluster}>
-              <StatusPill label="Trump" value={trumpSymbol || '—'} valueStyle={{ color: trumpColor }} />
-              <StatusPill label="Round" value={`${gameState.current_round}/${gameState.total_rounds}`} />
-              <StatusPill label="Cards" value={`${gameState.cards_this_round}`} />
-              <StatusPill label="Sets Completed" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
-              <StatusPill label="Total Bids" value={`${totalBids}`} />
-              <StatusPill label={connected ? 'Live' : 'Offline'} value={connected ? 'Connected' : 'Retrying'} muted={!connected} />
+              <StatusPill
+                label="Trump"
+                value={
+                  gameState.trump_suit
+                    ? `${trumpSymbol} ${gameState.trump_suit.charAt(0).toUpperCase() + gameState.trump_suit.slice(1)}`
+                    : '—'
+                }
+                valueStyle={{ color: trumpColor }}
+                primary
+              />
+              <StatusPill
+                label="Round"
+                value={`${gameState.current_round}/${gameState.total_rounds}`}
+                primary
+              />
+              <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
+              <StatusPill label="Bids" value={`${totalBids}/${gameState.cards_this_round}`} />
             </View>
           </View>
 
@@ -1049,17 +1066,22 @@ function StatusPill({
   label,
   value,
   muted,
+  primary,
   valueStyle,
 }: {
   label: string;
   value: string;
   muted?: boolean;
+  primary?: boolean;
   valueStyle?: object;
 }) {
   return (
-    <View style={[styles.statusPill, muted && styles.statusPillMuted]}>
+    <View style={[styles.statusPill, primary && styles.statusPillPrimary, muted && styles.statusPillMuted]}>
       <Text style={styles.statusPillLabel} numberOfLines={1}>{label}</Text>
-      <Text style={[styles.statusPillValue, valueStyle]} numberOfLines={1}>
+      <Text
+        style={[styles.statusPillValue, primary && styles.statusPillValuePrimary, valueStyle]}
+        numberOfLines={1}
+      >
         {value}
       </Text>
     </View>
@@ -1330,7 +1352,7 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     flexGrow: 1,
-    flexBasis: '28%',
+    flexBasis: '22%',
     paddingHorizontal: 11,
     paddingVertical: 8,
     borderRadius: 14,
@@ -1340,6 +1362,21 @@ const styles = StyleSheet.create({
   },
   statusPillMuted: {
     opacity: 0.72,
+  },
+  statusPillPrimary: {
+    borderColor: COLORS.borderAccent,
+    backgroundColor: 'rgba(212,175,55,0.08)',
+    flexBasis: '46%',
+  },
+  statusPillValuePrimary: {
+    fontSize: 15,
+  },
+  connDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
   statusPillLabel: {
     color: COLORS.textSecondary,
