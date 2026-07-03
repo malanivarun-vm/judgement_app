@@ -20,6 +20,22 @@ from game_engine import (
 VARIATIONS = ('v1', 'v1.1', 'v2', 'v3')
 VALID_SUITS = ('hearts', 'spades', 'diamonds', 'clubs')
 FORCE_GRACE_SECONDS = 15
+REACTION_COOLDOWN_SECONDS = 1.0
+
+REACTIONS: Dict[str, Dict[str, str]] = {
+    'laugh': {'display': '😂', 'kind': 'emoji'},
+    'cry': {'display': '😭', 'kind': 'emoji'},
+    'fire': {'display': '🔥', 'kind': 'emoji'},
+    'clap': {'display': '👏', 'kind': 'emoji'},
+    'scream': {'display': '😱', 'kind': 'emoji'},
+    'devil': {'display': '😈', 'kind': 'emoji'},
+    'mind_blown': {'display': '🤯', 'kind': 'emoji'},
+    'strong': {'display': '💪', 'kind': 'emoji'},
+    'nice_bid': {'display': 'Nice bid!', 'kind': 'phrase'},
+    'ouch': {'display': 'Ouch 💀', 'kind': 'phrase'},
+    'hurry': {'display': 'Hurry up! ⏳', 'kind': 'phrase'},
+    'gg': {'display': 'GG 🃏', 'kind': 'phrase'},
+}
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -58,6 +74,7 @@ class GameRoom:
         self.variation_config: Dict = {}
         self.remaining_deck: List[Dict] = []
         self.trump_caller_index = -1
+        self.last_reaction_at: Dict[str, float] = {}
 
     def get_state_for_player(self, player_id: str) -> Dict:
         player = next((p for p in self.players if p['id'] == player_id), None)
@@ -122,6 +139,39 @@ class GameRoom:
             try:
                 state = self.get_state_for_player(pid)
                 await ws.send_json(state)
+            except Exception as e:
+                logger.error(f"Error broadcasting to {pid}: {e}")
+
+    def handle_reaction(
+        self,
+        player_id: str,
+        reaction_id: Optional[str],
+        now: Optional[float] = None,
+    ) -> Optional[Dict]:
+        now = now if now is not None else time.time()
+        my_index = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
+        if my_index == -1:
+            return None
+        entry = REACTIONS.get(reaction_id) if reaction_id else None
+        if not entry:
+            return None
+        last = self.last_reaction_at.get(player_id)
+        if last is not None and now - last < REACTION_COOLDOWN_SECONDS:
+            return None
+        self.last_reaction_at[player_id] = now
+        return {
+            'type': 'reaction',
+            'player_index': my_index,
+            'player_name': self.players[my_index]['name'],
+            'reaction_id': reaction_id,
+            'display': entry['display'],
+            'kind': entry['kind'],
+        }
+
+    async def broadcast_payload(self, payload: Dict):
+        for pid, ws in list(self.connections.items()):
+            try:
+                await ws.send_json(payload)
             except Exception as e:
                 logger.error(f"Error broadcasting to {pid}: {e}")
 
@@ -561,6 +611,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 if error:
                     await websocket.send_json({"type": "error", "message": error})
                     continue
+
+            elif action == 'reaction':
+                payload = room.handle_reaction(player_id, data.get('reaction_id'))
+                if payload:
+                    await room.broadcast_payload(payload)
+                continue
 
             await room.broadcast_state()
 

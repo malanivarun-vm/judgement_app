@@ -28,6 +28,8 @@ import BiddingModal from '../components/BiddingModal';
 import HandDisplay from '../components/HandDisplay';
 import ScoreBoard from '../components/ScoreBoard';
 import OpponentSeat from '../components/OpponentSeat';
+import ReactionOverlay, { IncomingReaction } from '../components/ReactionOverlay';
+import ReactionTray from '../components/ReactionTray';
 import TrickCardEntry from '../components/TrickCardEntry';
 import { seatPositions, seatSize } from '../utils/tableLayout';
 import { useCardSound } from '../utils/useCardSound';
@@ -95,6 +97,7 @@ export default function GameScreen() {
   const [showBidLock, setShowBidLock] = useState(false);
   const bidLockTimer = useRef<any>(null);
   const bidLockAnim = useRef(new Animated.Value(0)).current;
+  const [reactions, setReactions] = useState<IncomingReaction[]>([]);
   const [trumpReveal, setTrumpReveal] = useState<string | null>(null);
   const trumpRevealTimer = useRef<any>(null);
   const ambientPulse = useRef(new Animated.Value(0)).current;
@@ -270,6 +273,21 @@ export default function GameScreen() {
           setError(data.message);
           void fireHaptic('error');
           setTimeout(() => setError(''), 4000);
+        } else if (data.type === 'reaction') {
+          const key = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          setReactions((prev) => {
+            const next = [
+              ...prev,
+              {
+                key,
+                player_index: data.player_index,
+                player_name: data.player_name,
+                display: data.display,
+                kind: data.kind,
+              },
+            ];
+            return next.length > 8 ? next.slice(next.length - 8) : next;
+          });
         }
       } catch {
         // ignore parse errors
@@ -310,6 +328,10 @@ export default function GameScreen() {
     await fireHaptic(haptic);
     send(action);
   };
+
+  const removeReaction = useCallback((key: string) => {
+    setReactions((prev) => prev.filter((reaction) => reaction.key !== key));
+  }, []);
 
   useEffect(() => {
     if (!gameState || reduceMotion) return;
@@ -599,6 +621,15 @@ export default function GameScreen() {
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </ScrollView>
+        <View style={styles.lobbyReactionWrap}>
+          <ReactionTray onSend={(id) => void sendAction({ action: 'reaction', reaction_id: id }, 'light')} />
+        </View>
+        <ReactionOverlay
+          reactions={reactions}
+          playerCount={players.length}
+          reduceMotion={reduceMotion}
+          onDone={removeReaction}
+        />
       </SafeAreaView>
     );
   }
@@ -904,7 +935,9 @@ export default function GameScreen() {
                       ? { color: BID_STATUS_COLORS[bidStatus(myInfo.bid, myInfo.tricks_won)] }
                       : null,
                   ]}
-                  numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
                 >
                   {gameState.dealer_index === your_index ? 'Dealer' : ''}
                   {myInfo?.bid !== null && myInfo?.bid !== undefined
@@ -912,6 +945,7 @@ export default function GameScreen() {
                     : `${gameState.dealer_index === your_index ? ' • ' : ''}No bid yet`}
                 </Text>
               </View>
+              <ReactionTray onSend={(id) => void sendAction({ action: 'reaction', reaction_id: id }, 'light')} />
               <Text style={[styles.selfScore, { color: scoreColor(myInfo?.total_score || 0) }]}>{myInfo?.total_score || 0} pts</Text>
             </View>
           </View>
@@ -1050,6 +1084,13 @@ export default function GameScreen() {
               </View>
             </Animated.View>
           )}
+
+          <ReactionOverlay
+            reactions={reactions}
+            playerCount={players.length}
+            reduceMotion={reduceMotion}
+            onDone={removeReaction}
+          />
         </View>
       </View>
     </SafeAreaView>
@@ -1350,6 +1391,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginTop: 8,
+  },
+  lobbyReactionWrap: {
+    position: 'absolute',
+    right: 20,
+    bottom: 28,
   },
   errorText: {
     color: COLORS.danger,
