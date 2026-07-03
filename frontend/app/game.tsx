@@ -42,6 +42,7 @@ interface GameState {
     card_count: number;
     is_connected: boolean;
     has_bid: boolean;
+    offline_for: number | null;
   }[];
   your_id: string;
   your_index: number;
@@ -61,6 +62,7 @@ interface GameState {
   variation: string;
   variation_config: { cards_per_round?: number; total_rounds?: number };
   trump_caller_index: number;
+  force_grace_seconds: number;
 }
 
 export default function GameScreen() {
@@ -92,6 +94,8 @@ export default function GameScreen() {
   const trickPop = useRef(new Animated.Value(0)).current;
   const reduceMotionRef = useRef(false);
   const { width: SCREEN_W } = useWindowDimensions();
+  const [nowTick, setNowTick] = useState(0);
+  const stateReceivedAt = useRef(Date.now());
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -102,6 +106,11 @@ export default function GameScreen() {
   useEffect(() => {
     reduceMotionRef.current = reduceMotion;
   }, [reduceMotion]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (reduceMotion) return;
@@ -173,6 +182,7 @@ export default function GameScreen() {
         const data = JSON.parse(event.data);
         if (data.type === 'state') {
           setGameState(data);
+          stateReceivedAt.current = Date.now();
           // Handle trick completion display
           if (data.last_completed_trick) {
             const key = `${data.current_round}-${data.tricks_played}`;
@@ -341,6 +351,13 @@ export default function GameScreen() {
   const currentPlayerName = players[gameState.current_player_index]?.name || '';
   const isMyTurn = gameState.current_player_index === your_index;
   const opponents = players.filter((p) => p.id !== your_id);
+  const currentPlayer = players[gameState.current_player_index];
+  const currentPlayerOffline = currentPlayer && !currentPlayer.is_connected;
+  const offlineElapsed = currentPlayerOffline && currentPlayer.offline_for !== null
+    ? currentPlayer.offline_for + (Date.now() - stateReceivedAt.current) / 1000
+    : 0;
+  const forceRemaining = Math.max(0, Math.ceil((gameState.force_grace_seconds ?? 15) - offlineElapsed));
+  void nowTick; // re-render driver for the countdown
 
   // Playable cards logic
   const getPlayableIndices = (): Set<number> => {
@@ -729,6 +746,14 @@ export default function GameScreen() {
           </View>
 
           <View style={styles.centerStage}>
+            {currentPlayerOffline && (phase === 'playing' || phase === 'bidding') && (
+              <OfflineRecoveryBanner
+                name={currentPlayer.name}
+                remaining={forceRemaining}
+                isHost={isHost}
+                onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
+              />
+            )}
             <Animated.View
               style={[
                 styles.turnBanner,
@@ -1011,6 +1036,42 @@ function StatusPill({
       <Text style={[styles.statusPillValue, valueStyle]} numberOfLines={1}>
         {value}
       </Text>
+    </View>
+  );
+}
+
+function OfflineRecoveryBanner({
+  name,
+  remaining,
+  isHost,
+  onForce,
+}: {
+  name: string;
+  remaining: number;
+  isHost: boolean;
+  onForce: () => void;
+}) {
+  return (
+    <View style={styles.offlineBanner}>
+      <Text style={styles.offlineBannerTitle}>{name} is offline</Text>
+      {remaining > 0 ? (
+        <Text style={styles.offlineBannerSub}>
+          Giving them {remaining}s to reconnect…
+        </Text>
+      ) : isHost ? (
+        <TouchableOpacity
+          testID="force-action-btn"
+          style={styles.offlineForceBtn}
+          onPress={onForce}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.offlineForceBtnText}>Play for {name}</Text>
+        </TouchableOpacity>
+      ) : (
+        <Text style={styles.offlineBannerSub}>
+          The host can play their turn for them
+        </Text>
+      )}
     </View>
   );
 }
@@ -1637,6 +1698,39 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  offlineBanner: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.35)',
+    marginBottom: 10,
+    gap: 6,
+  },
+  offlineBannerTitle: {
+    color: COLORS.danger,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  offlineBannerSub: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  offlineForceBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    backgroundColor: COLORS.gold,
+  },
+  offlineForceBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '800',
   },
 
   // === ROUND END ===
