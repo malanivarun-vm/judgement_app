@@ -21,6 +21,26 @@ VARIATIONS = ('v1', 'v1.1', 'v2', 'v3')
 VALID_SUITS = ('hearts', 'spades', 'diamonds', 'clubs')
 FORCE_GRACE_SECONDS = 15
 REACTION_COOLDOWN_SECONDS = 1.0
+# How long a lobby player may stay disconnected (e.g. switched apps to share
+# the room code) before being removed from the room. Mobile browsers/OS
+# suspend WebSockets the moment the app is backgrounded, so this must be
+# generous — previously players were kicked (and empty rooms deleted)
+# instantly, which made the room look "inactive" after an app switch.
+LOBBY_GRACE_SECONDS = 300
+# How long a finished/abandoned room lingers before cleanup.
+ROOM_TTL_SECONDS = 60 * 60
+# Authoritative per-move countdown. When it expires the server acts for the
+# current player (safe lowest bid / first legal card / random trump).
+TURN_TIMER_SECONDS = 15
+# Host-selectable table pace → seconds per move.
+PACES = {'chill': 30, 'standard': 15, 'blitz': 7}
+# Extra seconds granted after a trick completes so players can watch the
+# result banner before the next lead is on the clock.
+TRICK_RESULT_BUFFER_SECONDS = 3
+# round_end auto-advances to the next round after this long.
+ROUND_END_AUTO_SECONDS = 25
+CHAT_COOLDOWN_SECONDS = 1.5
+CHAT_MAX_LEN = 200
 
 REACTIONS: Dict[str, Dict[str, str]] = {
     'laugh': {'display': '😂', 'kind': 'emoji'},
@@ -46,7 +66,7 @@ api_router = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# In-memory game rooms
+# In-memory game rooms (keyed by 4-letter room code)
 rooms: Dict[str, 'GameRoom'] = {}
 
 
@@ -75,6 +95,141 @@ class GameRoom:
         self.remaining_deck: List[Dict] = []
         self.trump_caller_index = -1
         self.last_reaction_at: Dict[str, float] = {}
+        self.last_chat_at: Dict[str, float] = {}
+        self.turn_deadline: Optional[float] = None
+        self.pace = 'standard'
+        self.turn_seconds = PACES['standard']
+        self.last_activity = time.time()
+
+    def set_pace(self, player_id: str, pace: str) -> Optional[str]:
+        player = next((p for p in self.players if p['id'] == player_id), None)
+        if not player or not player['is_host']:
+            return "Only the host can set the table pace"
+        if self.phase != 'waiting':
+            return "Game already started"
+        if pace not in PACES:
+            return "Unknown pace"
+        self.pace = pace
+        self.turn_seconds = PACES[pace]
+        return None
+
+    def _arm_timer(self):
+        """(Re)start the authoritative move countdown for the current phase."""
+        now = time.time()
+        if self.phase in ('bidding', 'trump_selection', 'trump_selection_v3'):
+            self.turn_deadline = now + self.turn_seconds
+        elif self.phase == 'playing':
+            buffer = (
+                TRICK_RESULT_BUFFER_SECONDS
+                if (self.last_completed_trick and not self.current_trick)
+                else 0
+            )
+            self.turn_deadline = now + self.turn_seconds + buffer
+        elif self.phase == 'round_end':
+            self.turn_deadline = now + ROUND_END_AUTO_SECONDS
+        else:
+            self.turn_deadline = None
+
+    def auto_act_current(self) -> Optional[str]:
+        """Perform a safe default action for the current player (used when
+        their move timer expires, and by the host force flow)."""
+        if self.phase == 'bidding':
+            restricted = []
+            idx = self.current_player_index
+            if idx == self.bidding_order[-1]:
+                bids_so_far = [self.players[i]['bid'] for i in self.bidding_order[:-1]]
+                restricted = get_restricted_bids(bids_so_far, self.cards_this_round)
+            target = self.players[idx]
+            bid = next(b for b in range(self.cards_this_round + 1) if b not in restricted)
+            return self.place_bid(target['id'], bid)
+
+        if self.phase == 'playing':
+            target = self.players[self.current_player_index]
+            hand = target['hand']
+            lead = self.current_trick[0]['card']['suit'] if self.current_trick else None
+            card = next(c for c in hand if is_valid_play(c, hand, lead))
+            return self.play_card(target['id'], card)
+
+        if self.phase == 'trump_selection':
+            target = self.players[self.trump_caller_index]
+            return self.call_trump(target['id'], None)  # blind draw
+
+        if self.phase == 'trump_selection_v3':
+            target = self.players[self.trump_caller_index]
+            return self.call_trump(target['id'], random.choice(VALID_SUITS))
+
+        return "Nothing to act on right now"
+
+    def handle_chat(
+        self,
+        player_id: str,
+        text,
+        now: Optional[float] = None,
+    ) -> Optional[Dict]:
+        now = now if now is not None else time.time()
+        my_index = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
+        if my_index == -1:
+            return None
+        if not isinstance(text, str):
+            return None
+        text = text.strip()[:CHAT_MAX_LEN]
+        if not text:
+            return None
+        last = self.last_chat_at.get(player_id)
+        if last is not None and now - last < CHAT_COOLDOWN_SECONDS:
+            return None
+        self.last_chat_at[player_id] = now
+        return {
+            'type': 'chat',
+            'player_index': my_index,
+            'player_name': self.players[my_index]['name'],
+            'text': text,
+            'ts': now,
+        }
+
+    def touch(self):
+        self.last_activity = time.time()
+
+    def prune_lobby_players(self) -> bool:
+        """Remove lobby players who have been offline past the grace period.
+        Returns True if anything changed. Never touches in-game players."""
+        if self.phase != 'waiting':
+            return False
+        now = time.time()
+        before = len(self.players)
+        self.players = [
+            p for p in self.players
+            if p.get('is_connected', True)
+            or not p.get('offline_since')
+            or (now - p['offline_since']) < LOBBY_GRACE_SECONDS
+        ]
+        changed = len(self.players) != before
+        if changed and self.players and not any(p['is_host'] for p in self.players):
+            # Prefer a connected player as the new host
+            new_host = next(
+                (p for p in self.players if p.get('is_connected', True)),
+                self.players[0],
+            )
+            new_host['is_host'] = True
+        return changed
+
+    def is_expired(self) -> bool:
+        """A room can be deleted when nobody is connected and either every
+        player has been gone past the lobby grace period or the room has
+        been idle past its TTL."""
+        if self.connections:
+            return False
+        now = time.time()
+        if now - self.last_activity > ROOM_TTL_SECONDS:
+            return True
+        if self.phase != 'waiting':
+            return False
+        return all(
+            not p.get('is_connected', True)
+            and p.get('offline_since')
+            and (now - p['offline_since']) > LOBBY_GRACE_SECONDS
+            for p in self.players
+        ) if self.players else (now - self.last_activity > LOBBY_GRACE_SECONDS)
 
     def get_state_for_player(self, player_id: str) -> Dict:
         player = next((p for p in self.players if p['id'] == player_id), None)
@@ -92,13 +247,14 @@ class GameRoom:
                 'card_count': len(p.get('hand', [])),
                 'is_connected': p.get('is_connected', True),
                 'has_bid': p.get('has_bid', False),
+                'streak': p.get('streak', 0),
                 'offline_for': (time.time() - p['offline_since'])
                     if (not p.get('is_connected', True) and p.get('offline_since'))
                     else None,
             })
 
         restricted_bids = []
-        if self.phase == 'bidding' and my_index == self.bidding_order[-1] if self.bidding_order else False:
+        if self.bidding_order and self.phase == 'bidding' and my_index == self.bidding_order[-1]:
             bids_so_far = [
                 self.players[i]['bid'] for i in self.bidding_order[:-1]
                 if self.players[i].get('has_bid')
@@ -132,6 +288,13 @@ class GameRoom:
             'variation_config': self.variation_config,
             'trump_caller_index': self.trump_caller_index,
             'force_grace_seconds': FORCE_GRACE_SECONDS,
+            'turn_expires_in': (
+                max(0.0, self.turn_deadline - time.time())
+                if self.turn_deadline is not None else None
+            ),
+            'turn_timer_seconds': self.turn_seconds,
+            'round_end_auto_seconds': ROUND_END_AUTO_SECONDS,
+            'pace': self.pace,
         }
 
     async def broadcast_state(self):
@@ -218,6 +381,7 @@ class GameRoom:
         self.dealer_index = random.randint(0, num_players - 1)
         for p in self.players:
             p['total_score'] = 0
+            p['streak'] = 0
         self.round_history = []
         self.current_round = 0
         self._start_round()
@@ -263,6 +427,7 @@ class GameRoom:
             self.trump_suit = None if self.variation == 'v3' else get_trump_suit(self.current_round)
             self.current_player_index = self.bidding_order[0]
             self.phase = 'bidding'
+        self._arm_timer()
 
     def call_trump(self, player_id: str, suit: Optional[str]) -> Optional[str]:
         idx = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
@@ -299,6 +464,7 @@ class GameRoom:
             self.current_player_index = (self.dealer_index + 1) % len(self.players)
             self.phase = 'playing'
 
+        self._arm_timer()
         return None
 
     def place_bid(self, player_id: str, bid: int) -> Optional[str]:
@@ -343,6 +509,7 @@ class GameRoom:
         else:
             self.current_player_index = self.bidding_order[self.bidding_position]
 
+        self._arm_timer()
         return None
 
     def play_card(self, player_id: str, card: Dict) -> Optional[str]:
@@ -399,11 +566,19 @@ class GameRoom:
         else:
             self.current_player_index = (idx + 1) % len(self.players)
 
+        self._arm_timer()
         return None
 
-    def force_action(self, host_id: str) -> Optional[str]:
-        host = next((p for p in self.players if p['id'] == host_id), None)
-        if not host or not host['is_host']:
+    def force_action(self, requester_id: str) -> Optional[str]:
+        requester = next((p for p in self.players if p['id'] == requester_id), None)
+        if not requester:
+            return "Player not found"
+        host = next((p for p in self.players if p['is_host']), None)
+        host_offline = host is None or not host.get('is_connected', True)
+        # Normally only the host may act for an offline player, but if the
+        # host is themselves offline, any connected player may step in so the
+        # game can't soft-lock.
+        if not requester['is_host'] and not host_offline:
             return "Only the host can act for an offline player"
         if self.phase not in ('bidding', 'playing', 'trump_selection', 'trump_selection_v3'):
             return "Nothing to act on right now"
@@ -414,32 +589,15 @@ class GameRoom:
         if elapsed < FORCE_GRACE_SECONDS:
             return f"Please wait {int(FORCE_GRACE_SECONDS - elapsed) + 1}s before acting for {target['name']}"
 
-        if self.phase == 'bidding':
-            restricted = []
-            idx = self.current_player_index
-            if idx == self.bidding_order[-1]:
-                bids_so_far = [self.players[i]['bid'] for i in self.bidding_order[:-1]]
-                restricted = get_restricted_bids(bids_so_far, self.cards_this_round)
-            bid = next(b for b in range(self.cards_this_round + 1) if b not in restricted)
-            return self.place_bid(target['id'], bid)
-
-        if self.phase == 'playing':
-            hand = target['hand']
-            lead = self.current_trick[0]['card']['suit'] if self.current_trick else None
-            card = next(c for c in hand if is_valid_play(c, hand, lead))
-            return self.play_card(target['id'], card)
-
-        if self.phase == 'trump_selection':
-            return self.call_trump(target['id'], None)  # blind draw
-
-        # trump_selection_v3 requires an explicit suit
-        return self.call_trump(target['id'], random.choice(VALID_SUITS))
+        return self.auto_act_current()
 
     def _end_round(self):
         round_scores = {}
         for p in self.players:
             score = calculate_round_score(p['bid'], p['tricks_won'])
             p['total_score'] += score
+            # 🔥 streak: consecutive rounds hitting the bid exactly
+            p['streak'] = p.get('streak', 0) + 1 if p['bid'] == p['tricks_won'] else 0
             round_scores[p['id']] = {
                 'name': p['name'],
                 'bid': p['bid'],
@@ -462,6 +620,7 @@ class GameRoom:
         else:
             self.phase = 'round_end'
             self.dealer_index = (self.dealer_index + 1) % len(self.players)
+        self._arm_timer()
 
     def next_round(self):
         if self.phase == 'round_end':
@@ -482,15 +641,20 @@ async def root():
     return {"message": "Judgement Card Game API"}
 
 
+def cleanup_rooms():
+    """Prune long-gone lobby players and delete genuinely expired rooms.
+    Rooms whose players merely backgrounded the app are kept alive."""
+    for room in list(rooms.values()):
+        room.prune_lobby_players()
+    to_remove = [rid for rid, room in rooms.items() if room.is_expired()]
+    for rid in to_remove:
+        logger.info(f"Room expired: {rid}")
+        del rooms[rid]
+
+
 @api_router.post("/rooms")
 async def create_room():
-    # Cleanup empty rooms
-    to_remove = [
-        rid for rid, room in rooms.items()
-        if not room.connections and room.phase == 'waiting'
-    ]
-    for rid in to_remove:
-        del rooms[rid]
+    cleanup_rooms()
 
     room_id = generate_room_id()
     rooms[room_id] = GameRoom(room_id)
@@ -500,6 +664,7 @@ async def create_room():
 
 @api_router.get("/rooms/{room_id}/exists")
 async def check_room(room_id: str):
+    cleanup_rooms()
     rid = room_id.upper()
     exists = rid in rooms
     joinable = exists and rooms[rid].phase == 'waiting' and len(rooms[rid].players) < 7
@@ -522,6 +687,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         await websocket.send_json({"type": "error", "message": "Room not found"})
         await websocket.close()
         return
+
+    room.touch()
 
     # Check reconnection
     existing = next((p for p in room.players if p['id'] == player_id), None)
@@ -560,6 +727,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             raw = await websocket.receive_text()
             data = json.loads(raw)
             action = data.get('action')
+            room.touch()
+
+            if action == 'ping':
+                # Client heartbeat — keeps proxies from dropping idle
+                # sockets and marks the room as alive. No broadcast needed.
+                await websocket.send_json({"type": "pong"})
+                continue
 
             if action == 'start_game':
                 player = next((p for p in room.players if p['id'] == player_id), None)
@@ -576,6 +750,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
             elif action == 'set_variation':
                 error = room.set_variation(player_id, data.get('variation'), data.get('config') or {})
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
+            elif action == 'set_pace':
+                error = room.set_pace(player_id, data.get('pace'))
                 if error:
                     await websocket.send_json({"type": "error", "message": error})
                     continue
@@ -603,8 +783,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
             elif action == 'new_game':
                 player = next((p for p in room.players if p['id'] == player_id), None)
-                if player and player['is_host']:
-                    room.start_game()
+                if not player or not player['is_host']:
+                    await websocket.send_json({"type": "error", "message": "Only the host can start a new game"})
+                    continue
+                if room.phase != 'game_over':
+                    await websocket.send_json({"type": "error", "message": "Finish the current game first"})
+                    continue
+                room.start_game()
 
             elif action == 'force_action':
                 error = room.force_action(player_id)
@@ -618,38 +803,97 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     await room.broadcast_payload(payload)
                 continue
 
+            elif action == 'chat':
+                payload = room.handle_chat(player_id, data.get('text'))
+                if payload:
+                    await room.broadcast_payload(payload)
+                continue
+
             await room.broadcast_state()
 
     except WebSocketDisconnect:
         logger.info(f"Player {player_name} ({player_id}) disconnected from {room_id}")
         existing = next((p for p in room.players if p['id'] == player_id), None)
-        if player_id in room.connections:
+        if room.connections.get(player_id) is websocket:
             del room.connections[player_id]
 
-        if room.phase == 'waiting':
-            room.players = [p for p in room.players if p['id'] != player_id]
-            if not room.players:
-                if room_id in rooms:
-                    del rooms[room_id]
-                return
-            if not any(p['is_host'] for p in room.players):
-                room.players[0]['is_host'] = True
-        else:
-            if existing:
-                existing['is_connected'] = False
-                existing['offline_since'] = time.time()
+        # NEVER remove players immediately — mobile browsers/OS suspend the
+        # WebSocket the moment the app is backgrounded (e.g. switching apps
+        # to share the room code). Mark offline and let the grace-period
+        # pruner clean up players who are truly gone.
+        if existing and room.connections.get(player_id) is None:
+            existing['is_connected'] = False
+            existing['offline_since'] = time.time()
+        room.touch()
 
         if room_id in rooms:
             await room.broadcast_state()
 
     except Exception as e:
         logger.error(f"WebSocket error for {player_id}: {e}")
-        if player_id in room.connections:
+        if room.connections.get(player_id) is websocket:
             del room.connections[player_id]
         existing = next((p for p in room.players if p['id'] == player_id), None)
-        if existing:
+        if existing and room.connections.get(player_id) is None:
             existing['is_connected'] = False
             existing['offline_since'] = time.time()
+
+
+@app.on_event("startup")
+async def start_room_sweeper():
+    import asyncio
+
+    async def tick():
+        """1s heartbeat: fire expired move timers and auto-advance rounds."""
+        while True:
+            await asyncio.sleep(1)
+            try:
+                now = time.time()
+                for room in list(rooms.values()):
+                    if room.turn_deadline is None or now < room.turn_deadline:
+                        continue
+                    if room.phase == 'round_end':
+                        room.next_round()
+                        await room.broadcast_state()
+                    elif room.phase in ('bidding', 'playing', 'trump_selection', 'trump_selection_v3'):
+                        timed_out = room.players[room.current_player_index]['name']
+                        error = room.auto_act_current()
+                        if error:
+                            # Don't hot-loop on a stuck room — retry shortly
+                            room.turn_deadline = now + 5
+                            logger.error(f"Auto-act failed in {room.room_id}: {error}")
+                        else:
+                            await room.broadcast_payload({
+                                'type': 'timeout',
+                                'player_name': timed_out,
+                            })
+                        await room.broadcast_state()
+                    else:
+                        room.turn_deadline = None
+            except Exception as e:
+                logger.error(f"Turn ticker error: {e}")
+
+    asyncio.create_task(tick())
+
+    async def sweep():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                changed_rooms = [
+                    room for room in list(rooms.values())
+                    if room.prune_lobby_players()
+                ]
+                expired = [rid for rid, room in rooms.items() if room.is_expired()]
+                for rid in expired:
+                    logger.info(f"Room expired: {rid}")
+                    del rooms[rid]
+                for room in changed_rooms:
+                    if room.room_id in rooms:
+                        await room.broadcast_state()
+            except Exception as e:
+                logger.error(f"Room sweeper error: {e}")
+
+    asyncio.create_task(sweep())
 
 
 app.include_router(api_router)
@@ -661,3 +905,4 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+

@@ -70,3 +70,16 @@ export const FONTS = {
   bodyMedium:  'DMSans_600SemiBold',
   mono:        'JetBrainsMono_700Bold',
 } as const;
+
+// Cinematic display serif for the casino-luxe look (wordmarks, overlay
+// titles). System serif stacks — zero extra font payload on any platform.
+import { Platform } from 'react-native';
+
+export const SERIF = Platform.select({
+  web: 'Georgia, "Palatino Linotype", "Book Antiqua", "Times New Roman", serif',
+  ios: 'Georgia',
+  default: 'serif',
+}) as string;
+
+export const SERIF_ITALIC_STYLE = { fontFamily: SERIF, fontStyle: 'italic' as const };
+
