@@ -19,6 +19,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
 import { VARIATIONS } from '../utils/variations';
+import { bidStatus, BID_STATUS_COLORS, BID_STATUS_LABELS, scoreColor } from '../utils/bidStatus';
 import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
 import HandDisplay from '../components/HandDisplay';
@@ -727,16 +728,33 @@ export default function GameScreen() {
                         </Text>
                         {isDealer && <Text style={styles.dealerBadge}>D</Text>}
                       </View>
-                      <Text style={styles.opponentScore} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{opp.total_score} pts</Text>
+                      <Text
+                        style={[styles.opponentScore, { color: scoreColor(opp.total_score) }]}
+                        numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
+                      >
+                        {opp.total_score} pts
+                      </Text>
                     </View>
                   </View>
-                  <Text style={styles.opponentBody} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                    {opp.has_bid || opp.bid !== null
-                      ? `Bid ${opp.bid}  Won ${opp.tricks_won}`
-                      : phase === 'bidding'
-                        ? 'Waiting to bid'
-                        : `Cards ${opp.card_count}`}
-                  </Text>
+                  {(() => {
+                    if (opp.has_bid || opp.bid !== null) {
+                      const st = bidStatus(opp.bid, opp.tricks_won);
+                      const label = BID_STATUS_LABELS[st];
+                      return (
+                        <Text
+                          style={[styles.opponentBody, { color: BID_STATUS_COLORS[st] }]}
+                          numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
+                        >
+                          {`Bid ${opp.bid} · Won ${opp.tricks_won}${label ? ` · ${label}` : ''}`}
+                        </Text>
+                      );
+                    }
+                    return (
+                      <Text style={styles.opponentBody} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                        {phase === 'bidding' ? 'Waiting to bid' : `Cards ${opp.card_count}`}
+                      </Text>
+                    );
+                  })()}
                   {!opp.is_connected && (
                     <Text style={styles.disconnected}>Offline</Text>
                   )}
@@ -837,14 +855,22 @@ export default function GameScreen() {
             <View style={styles.selfMeta}>
               <View>
                 <Text style={styles.selfName}>{myInfo?.name || params.player_name}</Text>
-                <Text style={styles.selfSubtext} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                  {gameState.dealer_index === your_index ? 'Dealer' : 'Player'}
+                <Text
+                  style={[
+                    styles.selfSubtext,
+                    myInfo?.bid !== null && myInfo?.bid !== undefined
+                      ? { color: BID_STATUS_COLORS[bidStatus(myInfo.bid, myInfo.tricks_won)] }
+                      : null,
+                  ]}
+                  numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
+                >
+                  {gameState.dealer_index === your_index ? 'Dealer' : ''}
                   {myInfo?.bid !== null && myInfo?.bid !== undefined
-                    ? ` • Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
-                    : ' • No bid yet'}
+                    ? `${gameState.dealer_index === your_index ? ' • ' : ''}Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
+                    : `${gameState.dealer_index === your_index ? ' • ' : ''}No bid yet`}
                 </Text>
               </View>
-              <Text style={styles.selfScore}>{myInfo?.total_score || 0} pts</Text>
+              <Text style={[styles.selfScore, { color: scoreColor(myInfo?.total_score || 0) }]}>{myInfo?.total_score || 0} pts</Text>
             </View>
           </View>
 
