@@ -15,13 +15,16 @@ import {
   Easing,
   AccessibilityInfo,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { parseRoomCodeParam } from '../utils/share';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const PLAYER_NAME_KEY = 'judgement_player_name';
 
 function generateId(): string {
   return 'p_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
@@ -29,6 +32,7 @@ function generateId(): string {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { code: codeParam } = useLocalSearchParams<{ code?: string }>();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,6 +43,21 @@ export default function HomeScreen() {
     AccessibilityInfo.isReduceMotionEnabled()
       .then(setReduceMotion)
       .catch(() => setReduceMotion(false));
+  }, []);
+
+  useEffect(() => {
+    const parsed = parseRoomCodeParam(codeParam);
+    if (parsed) setRoomCode(parsed);
+  }, [codeParam]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(PLAYER_NAME_KEY)
+      .then((saved) => {
+        if (saved) setPlayerName((current) => current || saved);
+      })
+      .catch(() => {
+        // storage unavailable — name entry stays manual
+      });
   }, []);
 
   useEffect(() => {
@@ -86,6 +105,7 @@ export default function HomeScreen() {
       const res = await fetch(`${BACKEND_URL}/api/rooms`, { method: 'POST' });
       const data = await res.json();
       const playerId = generateId();
+      void AsyncStorage.setItem(PLAYER_NAME_KEY, playerName.trim()).catch(() => {});
       router.push({
         pathname: '/game',
         params: {
@@ -126,6 +146,7 @@ export default function HomeScreen() {
         return;
       }
       const playerId = generateId();
+      void AsyncStorage.setItem(PLAYER_NAME_KEY, playerName.trim()).catch(() => {});
       router.push({
         pathname: '/game',
         params: {

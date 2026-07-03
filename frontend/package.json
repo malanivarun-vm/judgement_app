@@ -8,7 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@babel/runtime": "^7.20.6",
@@ -26,6 +27,7 @@
     "expo": "~54.0.34",
     "expo-audio": "~1.1.1",
     "expo-blur": "~15.0.8",
+    "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.13",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",

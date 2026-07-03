@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  Share,
   ActivityIndicator,
   Animated,
   Easing,
@@ -16,6 +17,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as Clipboard from 'expo-clipboard';
+import { Ionicons } from '@expo/vector-icons';
+import { buildShareMessage } from '../utils/share';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
 import { VARIATIONS } from '../utils/variations';
 import { bidStatus, BID_STATUS_COLORS, scoreColor } from '../utils/bidStatus';
@@ -157,6 +161,54 @@ export default function GameScreen() {
       // ignore unsupported platforms
     }
   }, []);
+
+  const [codeCopied, setCodeCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    };
+  }, []);
+
+  const getShareOrigin = (): string => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
+      return window.location.origin;
+    }
+    return '';
+  };
+
+  const copyRoomCode = async (roomId: string) => {
+    try {
+      await Clipboard.setStringAsync(roomId);
+      void fireHaptic('light');
+      setCodeCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCodeCopied(false), 1500);
+    } catch {
+      Alert.alert('Copy failed', `Room code: ${roomId}`);
+    }
+  };
+
+  const shareRoomCode = async (roomId: string) => {
+    const message = buildShareMessage(roomId, getShareOrigin());
+    void fireHaptic('selection');
+    try {
+      if (Platform.OS === 'web') {
+        const nav = typeof navigator !== 'undefined' ? (navigator as any) : null;
+        if (nav?.share) {
+          await nav.share({ text: message });
+        } else {
+          await Clipboard.setStringAsync(message);
+          Alert.alert('Message copied', 'Paste it anywhere to invite friends');
+        }
+      } else {
+        await Share.share({ message });
+      }
+    } catch {
+      // user dismissed the share sheet — not an error
+    }
+  };
 
   const connect = useCallback(() => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) return;
@@ -402,6 +454,34 @@ export default function GameScreen() {
             <Text style={styles.roomCodeLabel}>ROOM CODE</Text>
             <Text style={styles.roomCode}>{gameState.room_id}</Text>
             <Text style={styles.roomCodeHint}>Share this code with friends</Text>
+            <View style={styles.roomCodeActions}>
+              <TouchableOpacity
+                testID="copy-code-btn"
+                style={styles.roomCodeActionBtn}
+                onPress={() => void copyRoomCode(gameState.room_id)}
+                activeOpacity={0.7}
+                accessibilityLabel="Copy room code"
+              >
+                <Ionicons
+                  name={codeCopied ? 'checkmark' : 'copy-outline'}
+                  size={16}
+                  color={codeCopied ? COLORS.success : COLORS.gold}
+                />
+                <Text style={[styles.roomCodeActionText, codeCopied && styles.roomCodeActionTextDone]}>
+                  {codeCopied ? 'Copied!' : 'Copy'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="share-code-btn"
+                style={styles.roomCodeActionBtn}
+                onPress={() => void shareRoomCode(gameState.room_id)}
+                activeOpacity={0.7}
+                accessibilityLabel="Share room code"
+              >
+                <Ionicons name="share-social-outline" size={16} color={COLORS.gold} />
+                <Text style={styles.roomCodeActionText}>Share</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <Text style={styles.playerCountText}>
@@ -1146,6 +1226,31 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 12,
     marginTop: 4,
+  },
+  roomCodeActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  roomCodeActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: COLORS.borderAccent,
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    minHeight: 44,
+  },
+  roomCodeActionText: {
+    color: COLORS.gold,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  roomCodeActionTextDone: {
+    color: COLORS.success,
   },
   playerCountText: {
     color: COLORS.text,
