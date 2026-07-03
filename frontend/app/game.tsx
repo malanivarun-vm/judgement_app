@@ -24,7 +24,9 @@ import BiddingModal from '../components/BiddingModal';
 import HandDisplay from '../components/HandDisplay';
 import ScoreBoard from '../components/ScoreBoard';
 import OpponentSeat from '../components/OpponentSeat';
+import TrickCardEntry from '../components/TrickCardEntry';
 import { seatPositions, seatSize } from '../utils/tableLayout';
+import { useCardSound } from '../utils/useCardSound';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
@@ -98,6 +100,8 @@ export default function GameScreen() {
   const [nowTick, setNowTick] = useState(0);
   const stateReceivedAt = useRef(Date.now());
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
+  const playCardSound = useCardSound();
+  const prevTrickLenRef = useRef(0);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -185,6 +189,11 @@ export default function GameScreen() {
         if (data.type === 'state') {
           setGameState(data);
           stateReceivedAt.current = Date.now();
+          const trickLen = (data.current_trick || []).length;
+          if (trickLen > prevTrickLenRef.current) {
+            playCardSound();
+          }
+          prevTrickLenRef.current = trickLen;
           // Handle trick completion display
           if (data.last_completed_trick) {
             const key = `${data.current_round}-${data.tricks_played}`;
@@ -214,7 +223,7 @@ export default function GameScreen() {
         // ignore parse errors
       }
     };
-  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop, playCardSound]);
 
   useEffect(() => {
     connect();
@@ -749,9 +758,11 @@ export default function GameScreen() {
                           const isWinner = trickResult && tc.player_index === trickResult.winner_index;
                           return (
                             <View key={i} style={styles.trickCardWrap}>
-                              <View style={isWinner ? styles.winnerHighlight : undefined}>
-                                <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
-                              </View>
+                              <TrickCardEntry animate={!trickResult && i === displayTrickCards.length - 1}>
+                                <View style={isWinner ? styles.winnerHighlight : undefined}>
+                                  <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
+                                </View>
+                              </TrickCardEntry>
                               <Text style={styles.trickCardName}>
                                 {players[tc.player_index]?.name || '?'}
                               </Text>
