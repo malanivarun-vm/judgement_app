@@ -19,11 +19,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
 import { VARIATIONS } from '../utils/variations';
-import { bidStatus, BID_STATUS_COLORS, BID_STATUS_LABELS, scoreColor } from '../utils/bidStatus';
+import { bidStatus, BID_STATUS_COLORS, scoreColor } from '../utils/bidStatus';
 import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
 import HandDisplay from '../components/HandDisplay';
 import ScoreBoard from '../components/ScoreBoard';
+import OpponentSeat from '../components/OpponentSeat';
+import { seatPositions, seatSize } from '../utils/tableLayout';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
@@ -97,6 +99,7 @@ export default function GameScreen() {
   const { width: SCREEN_W } = useWindowDimensions();
   const [nowTick, setNowTick] = useState(0);
   const stateReceivedAt = useRef(Date.now());
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -242,28 +245,6 @@ export default function GameScreen() {
         },
       },
     ]);
-  };
-
-  const getOpponentSeatStyle = (index: number, count: number) => {
-    const stageWidth = Math.max(280, SCREEN_W - 32);
-    const seatWidth = Math.min(128, Math.max(96, Math.floor(stageWidth / Math.max(3, count + 1))));
-    const seatHeight = 76;
-    const centerX = stageWidth / 2;
-    const centerY = 104;
-    const radiusX = Math.max(64, stageWidth * 0.34);
-    const radiusY = 52;
-    const thetaStart = Math.PI * 1.12;
-    const thetaEnd = Math.PI * 1.88;
-    const theta = count === 1
-      ? Math.PI * 1.5
-      : thetaStart + ((thetaEnd - thetaStart) * index) / Math.max(1, count - 1);
-
-    return {
-      left: centerX + Math.cos(theta) * radiusX - seatWidth / 2,
-      top: centerY + Math.sin(theta) * radiusY - seatHeight / 2,
-      width: seatWidth,
-      height: seatHeight,
-    };
   };
 
   const sendAction = async (action: any, haptic: 'selection' | 'light' | 'medium' | 'success' = 'selection') => {
@@ -630,7 +611,6 @@ export default function GameScreen() {
   const trumpColor = SUIT_DISPLAY_COLORS[gameState.trump_suit] || '#FFF';
   const trumpSymbol = SUIT_SYMBOLS[gameState.trump_suit] || '';
   const showBiddingModal = phase === 'bidding' && isMyTurn;
-  const seatCount = opponents.length;
   const totalBids = players.filter((p) => p.has_bid).reduce((sum, p) => sum + (p.bid ?? 0), 0);
   const showTrumpSelection = phase === 'trump_selection' || phase === 'trump_selection_v3';
   const trumpCaller = players[gameState.trump_caller_index];
@@ -719,153 +699,109 @@ export default function GameScreen() {
             </View>
           </View>
 
-          <View style={styles.opponentStage}>
-            {opponents.map((opp, index) => {
-              const oppIdx = players.findIndex((p) => p.id === opp.id);
-              const isOppTurn = gameState.current_player_index === oppIdx;
-              const isDealer = gameState.dealer_index === oppIdx;
+          <View
+            style={styles.ovalStage}
+            onLayout={(e) => setStageSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+          >
+            {stageSize.w > 0 && (() => {
+              const { width: seatW, height: seatH } = seatSize(opponents.length, stageSize.w);
+              const positions = seatPositions(opponents.length, stageSize.w, stageSize.h, seatW, seatH);
               return (
-                <View
-                  key={opp.id}
-                  testID={`opponent-${opp.id}`}
-                  style={[
-                    styles.opponentSeat,
-                    getOpponentSeatStyle(index, seatCount),
-                    isOppTurn && styles.opponentSeatActive,
-                  ]}
-                >
-                  <View style={styles.opponentSeatTop}>
-                    <View style={[styles.seatAvatar, isOppTurn && styles.seatAvatarActive]}>
-                      <Text style={styles.seatAvatarText}>{opp.name[0]?.toUpperCase()}</Text>
-                    </View>
-                    <View style={styles.opponentSeatMeta}>
-                      <View style={styles.seatNameRow}>
-                        <Text style={styles.opponentName} numberOfLines={1}>
-                          {opp.name}
-                        </Text>
-                        {isDealer && <Text style={styles.dealerBadge}>D</Text>}
-                      </View>
-                      <Text
-                        style={[styles.opponentScore, { color: scoreColor(opp.total_score) }]}
-                        numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}
+                <>
+                  <View
+                    style={[
+                      styles.tableSurface,
+                      {
+                        left: seatW * 0.5,
+                        right: seatW * 0.5,
+                        top: seatH * 0.8,
+                        bottom: seatH * 0.3,
+                        borderRadius: Math.max(60, (stageSize.h - seatH * 1.1) / 2),
+                      },
+                    ]}
+                  >
+                    {currentPlayerOffline && (phase === 'playing' || phase === 'bidding') && (
+                      <OfflineRecoveryBanner
+                        name={currentPlayer.name}
+                        remaining={forceRemaining}
+                        isHost={isHost}
+                        onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
+                      />
+                    )}
+
+                    {trickResult && (
+                      <Animated.View
+                        style={[
+                          styles.trickResultCard,
+                          {
+                            opacity: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.1, 1] }),
+                            transform: [
+                              { scale: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) },
+                            ],
+                          },
+                        ]}
                       >
-                        {opp.total_score} pts
-                      </Text>
-                    </View>
-                  </View>
-                  {(() => {
-                    if (opp.has_bid || opp.bid !== null) {
-                      const st = bidStatus(opp.bid, opp.tricks_won);
-                      const label = BID_STATUS_LABELS[st];
-                      return (
-                        <Text
-                          style={[styles.opponentBody, { color: BID_STATUS_COLORS[st] }]}
-                          numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
-                        >
-                          {`Bid ${opp.bid} · Won ${opp.tricks_won}${label ? ` · ${label}` : ''}`}
-                        </Text>
-                      );
-                    }
-                    return (
-                      <Text style={styles.opponentBody} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                        {phase === 'bidding' ? 'Waiting to bid' : `Cards ${opp.card_count}`}
-                      </Text>
-                    );
-                  })()}
-                  {!opp.is_connected && (
-                    <Text style={styles.disconnected}>Offline</Text>
-                  )}
-                </View>
-              );
-            })}
-          </View>
+                        <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the trick</Text>
+                      </Animated.View>
+                    )}
 
-          <View style={styles.centerStage}>
-            {currentPlayerOffline && (phase === 'playing' || phase === 'bidding') && (
-              <OfflineRecoveryBanner
-                name={currentPlayer.name}
-                remaining={forceRemaining}
-                isHost={isHost}
-                onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
-              />
-            )}
-            <Animated.View
-              style={[
-                styles.turnBanner,
-                {
-                  opacity: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.7, 1] }),
-                  transform: [
-                    {
-                      scale: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.98, 1.02] }),
-                    },
-                  ],
-                },
-              ]}
-            >
-              <Text style={[styles.turnText, isMyTurn && styles.turnTextActive]}>
-                {phase === 'bidding'
-                  ? isMyTurn
-                    ? 'Your turn to bid'
-                    : `Waiting for ${currentPlayerName} to bid`
-                  : isMyTurn
-                    ? 'Your turn to play'
-                    : `Waiting for ${currentPlayerName}`}
-              </Text>
-            </Animated.View>
-
-            <View style={styles.trickTable}>
-              <View style={styles.tableHeaderRow}>
-                <Text style={styles.tableHeaderLabel}>
-                  {phase === 'bidding' ? 'Bidding round' : 'Table'}
-                </Text>
-                {gameState.current_player_index === your_index && (
-                  <Text style={styles.tableHeaderBadge}>Your move</Text>
-                )}
-              </View>
-
-              {trickResult && (
-                <Animated.View
-                  style={[
-                    styles.trickResultCard,
-                    {
-                      opacity: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.1, 1] }),
-                      transform: [
-                        {
-                          scale: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the trick</Text>
-                </Animated.View>
-              )}
-
-              {displayTrickCards && displayTrickCards.length > 0 ? (
-                <View style={styles.trickCards}>
-                  {displayTrickCards.map((tc: any, i: number) => {
-                    const isWinner =
-                      trickResult && tc.player_index === trickResult.winner_index;
-                    return (
-                      <View key={i} style={styles.trickCardWrap}>
-                        <View style={isWinner ? styles.winnerHighlight : undefined}>
-                          <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
-                        </View>
-                        <Text style={styles.trickCardName}>
-                          {players[tc.player_index]?.name || '?'}
-                        </Text>
+                    {displayTrickCards && displayTrickCards.length > 0 ? (
+                      <View style={styles.trickCards}>
+                        {displayTrickCards.map((tc: any, i: number) => {
+                          const isWinner = trickResult && tc.player_index === trickResult.winner_index;
+                          return (
+                            <View key={i} style={styles.trickCardWrap}>
+                              <View style={isWinner ? styles.winnerHighlight : undefined}>
+                                <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
+                              </View>
+                              <Text style={styles.trickCardName}>
+                                {players[tc.player_index]?.name || '?'}
+                              </Text>
+                            </View>
+                          );
+                        })}
                       </View>
+                    ) : (
+                      <Text style={styles.tableCenterLabel}>
+                        {phase === 'bidding'
+                          ? isMyTurn
+                            ? 'Your turn to bid'
+                            : `Waiting for ${currentPlayerName} to bid`
+                          : isMyTurn
+                            ? 'Your turn — play a card'
+                            : `Waiting for ${currentPlayerName} to ${gameState.current_trick.length === 0 ? 'lead' : 'play'}`}
+                      </Text>
+                    )}
+
+                    {displayTrickCards && displayTrickCards.length > 0 && !trickResult && (
+                      <Animated.Text
+                        style={[
+                          styles.tableTurnHint,
+                          isMyTurn && styles.tableTurnHintActive,
+                          { opacity: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.7, 1] }) },
+                        ]}
+                      >
+                        {isMyTurn ? 'Your turn' : `Waiting for ${currentPlayerName}`}
+                      </Animated.Text>
+                    )}
+                  </View>
+
+                  {opponents.map((opp, index) => {
+                    const oppIdx = players.findIndex((p) => p.id === opp.id);
+                    return (
+                      <OpponentSeat
+                        key={opp.id}
+                        player={opp}
+                        isTurn={gameState.current_player_index === oppIdx}
+                        isDealer={gameState.dealer_index === oppIdx}
+                        phase={phase}
+                        style={{ ...positions[index], width: seatW, minHeight: seatH }}
+                      />
                     );
                   })}
-                </View>
-              ) : (
-                <View style={styles.emptyTrick}>
-                  <Text style={styles.emptyTrickLabel}>
-                    {phase === 'bidding' ? 'Bids are being locked in' : 'Play a card to begin'}
-                  </Text>
-                </View>
-              )}
-            </View>
+                </>
+              );
+            })()}
           </View>
 
           <View style={styles.selfDock}>
@@ -1391,124 +1327,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  opponentStage: {
+  ovalStage: {
+    flex: 1,
     position: 'relative',
-    height: 180,
-    marginBottom: 6,
+    marginVertical: 4,
   },
-  opponentSeat: {
+  tableSurface: {
     position: 'absolute',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    backgroundColor: 'rgba(8, 24, 17, 0.78)',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  opponentSeatActive: {
-    borderColor: COLORS.goldLight,
-    backgroundColor: 'rgba(243,229,171,0.08)',
-    shadowColor: COLORS.gold,
-    shadowOpacity: 0.28,
-  },
-  opponentSeatTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 3,
-  },
-  seatAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: COLORS.backgroundLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seatAvatarActive: {
-    backgroundColor: COLORS.gold,
-  },
-  seatAvatarText: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  opponentSeatMeta: {
-    flex: 1,
-    minWidth: 0,
-  },
-  seatNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  opponentName: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '800',
-    flex: 1,
-  },
-  opponentScore: {
-    color: COLORS.goldLight,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  opponentBody: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  centerStage: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  turnBanner: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    marginBottom: 10,
-  },
-  trickTable: {
-    width: '100%',
-    maxWidth: 420,
-    minHeight: 160,
-    borderRadius: 26,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: COLORS.borderAccent,
-    backgroundColor: 'rgba(7, 21, 15, 0.72)',
-    padding: 14,
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    elevation: 4,
-  },
-  tableHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: 'rgba(15, 43, 29, 0.85)',
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    elevation: 4,
+    overflow: 'hidden',
   },
-  tableHeaderLabel: {
-    color: COLORS.goldLight,
+  tableCenterLabel: {
+    color: COLORS.textSecondary,
     fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
-  tableHeaderBadge: {
+  tableTurnHint: {
     color: COLORS.textSecondary,
     fontSize: 11,
     fontWeight: '700',
+  },
+  tableTurnHintActive: {
+    color: COLORS.gold,
   },
   trickResultCard: {
     alignSelf: 'center',
@@ -1519,19 +1372,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(212,175,55,0.28)',
     marginBottom: 10,
-  },
-  infoBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderGlass,
-  },
-  leaveBtn: {
-    padding: 6,
   },
   leaveBtnText: {
     color: COLORS.textSecondary,
@@ -1553,88 +1393,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  infoItem: {
-    alignItems: 'center',
-  },
-  infoValue: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  infoLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 10,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
-  // Opponents
-  opponentsScroll: {
-    maxHeight: 80,
-  },
-  opponentsContent: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 8,
-  },
-  oppCard: {
-    backgroundColor: COLORS.surfaceGlass,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    minWidth: 90,
-    alignItems: 'center',
-  },
-  oppCardActive: {
-    borderColor: COLORS.goldLight,
-    backgroundColor: 'rgba(243,229,171,0.08)',
-  },
-  oppTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  oppName: {
-    color: COLORS.text,
-    fontSize: 12,
-    fontWeight: '700',
-    maxWidth: 70,
-  },
-  dealerBadge: {
-    color: COLORS.gold,
-    fontSize: 10,
-    fontWeight: '800',
-    backgroundColor: 'rgba(212,175,55,0.2)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  oppBid: {
-    color: COLORS.textSecondary,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  oppScore: {
-    color: COLORS.goldLight,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  disconnected: {
-    color: COLORS.danger,
-    fontSize: 9,
-    fontWeight: '600',
-  },
-
   // Trick Area
-  trickArea: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
   trickWinnerText: {
     color: COLORS.gold,
     fontSize: 14,
@@ -1663,34 +1422,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: '600',
   },
-  emptyTrick: {
-    minHeight: 90,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    borderStyle: 'dashed',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-  },
-  emptyTrickLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-
-  turnText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  turnTextActive: {
-    color: COLORS.gold,
-    fontWeight: '700',
-  },
-
   selfDock: {
     paddingHorizontal: 10,
     paddingVertical: 10,
@@ -1726,21 +1457,6 @@ const styles = StyleSheet.create({
   handDock: {
     paddingHorizontal: 8,
     paddingBottom: 8,
-  },
-  handLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-    paddingHorizontal: 6,
-  },
-  handContent: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    justifyContent: 'center',
-    gap: 6,
   },
 
   // Error Banner
