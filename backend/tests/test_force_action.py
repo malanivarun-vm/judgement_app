@@ -98,6 +98,32 @@ def test_force_action_calls_trump_v2():
     assert room.phase == 'bidding'
 
 
+def test_force_action_calls_trump_v3():
+    room = GameRoom("TEST")
+    for i in range(3):
+        room.players.append({
+            'id': f'p{i}', 'name': f'Player{i}', 'is_host': i == 0,
+            'hand': [], 'bid': None, 'has_bid': False,
+            'tricks_won': 0, 'total_score': 0,
+            'is_connected': True, 'offline_since': None,
+        })
+    room.variation = 'v3'
+    room.start_game()
+    assert room.phase == 'bidding'
+    # Complete bidding: all players must bid
+    for idx in room.bidding_order:
+        pid = room.players[idx]['id']
+        bid = 1 if idx == room.bidding_order[-1] else 0
+        assert room.place_bid(pid, bid) is None
+    # After bidding completes, phase should be 'trump_selection_v3'
+    assert room.phase == 'trump_selection_v3'
+    # Disconnect the trump caller (highest bidder)
+    disconnect(room, room.trump_caller_index)
+    assert room.force_action('p0') is None
+    assert room.trump_suit in ('hearts', 'spades', 'diamonds', 'clubs')
+    assert room.phase == 'playing'
+
+
 def test_state_includes_offline_fields():
     room = make_room()
     disconnect(room, 1, seconds_ago=20)
