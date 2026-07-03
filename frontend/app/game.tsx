@@ -12,17 +12,21 @@ import {
   AccessibilityInfo,
   Platform,
   StatusBar,
-  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
 import { VARIATIONS } from '../utils/variations';
+import { bidStatus, BID_STATUS_COLORS, scoreColor } from '../utils/bidStatus';
 import PlayingCard from '../components/PlayingCard';
 import BiddingModal from '../components/BiddingModal';
 import HandDisplay from '../components/HandDisplay';
 import ScoreBoard from '../components/ScoreBoard';
+import OpponentSeat from '../components/OpponentSeat';
+import TrickCardEntry from '../components/TrickCardEntry';
+import { seatPositions, seatSize } from '../utils/tableLayout';
+import { useCardSound } from '../utils/useCardSound';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
@@ -42,6 +46,7 @@ interface GameState {
     card_count: number;
     is_connected: boolean;
     has_bid: boolean;
+    offline_for: number | null;
   }[];
   your_id: string;
   your_index: number;
@@ -61,6 +66,7 @@ interface GameState {
   variation: string;
   variation_config: { cards_per_round?: number; total_rounds?: number };
   trump_caller_index: number;
+  force_grace_seconds: number;
 }
 
 export default function GameScreen() {
@@ -91,7 +97,11 @@ export default function GameScreen() {
   const turnPulse = useRef(new Animated.Value(0)).current;
   const trickPop = useRef(new Animated.Value(0)).current;
   const reduceMotionRef = useRef(false);
-  const { width: SCREEN_W } = useWindowDimensions();
+  const [nowTick, setNowTick] = useState(0);
+  const stateReceivedAt = useRef(Date.now());
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
+  const playCardSound = useCardSound();
+  const prevTrickLenRef = useRef(0);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -102,6 +112,11 @@ export default function GameScreen() {
   useEffect(() => {
     reduceMotionRef.current = reduceMotion;
   }, [reduceMotion]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (reduceMotion) return;
@@ -173,6 +188,12 @@ export default function GameScreen() {
         const data = JSON.parse(event.data);
         if (data.type === 'state') {
           setGameState(data);
+          stateReceivedAt.current = Date.now();
+          const trickLen = (data.current_trick || []).length;
+          if (trickLen > prevTrickLenRef.current) {
+            playCardSound();
+          }
+          prevTrickLenRef.current = trickLen;
           // Handle trick completion display
           if (data.last_completed_trick) {
             const key = `${data.current_round}-${data.tricks_played}`;
@@ -202,7 +223,7 @@ export default function GameScreen() {
         // ignore parse errors
       }
     };
-  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop, playCardSound]);
 
   useEffect(() => {
     connect();
@@ -231,28 +252,6 @@ export default function GameScreen() {
         },
       },
     ]);
-  };
-
-  const getOpponentSeatStyle = (index: number, count: number) => {
-    const stageWidth = Math.max(280, SCREEN_W - 32);
-    const seatWidth = Math.min(128, Math.max(96, Math.floor(stageWidth / Math.max(3, count + 1))));
-    const seatHeight = 76;
-    const centerX = stageWidth / 2;
-    const centerY = 104;
-    const radiusX = Math.max(64, stageWidth * 0.34);
-    const radiusY = 52;
-    const thetaStart = Math.PI * 1.12;
-    const thetaEnd = Math.PI * 1.88;
-    const theta = count === 1
-      ? Math.PI * 1.5
-      : thetaStart + ((thetaEnd - thetaStart) * index) / Math.max(1, count - 1);
-
-    return {
-      left: centerX + Math.cos(theta) * radiusX - seatWidth / 2,
-      top: centerY + Math.sin(theta) * radiusY - seatHeight / 2,
-      width: seatWidth,
-      height: seatHeight,
-    };
   };
 
   const sendAction = async (action: any, haptic: 'selection' | 'light' | 'medium' | 'success' = 'selection') => {
@@ -341,6 +340,13 @@ export default function GameScreen() {
   const currentPlayerName = players[gameState.current_player_index]?.name || '';
   const isMyTurn = gameState.current_player_index === your_index;
   const opponents = players.filter((p) => p.id !== your_id);
+  const currentPlayer = players[gameState.current_player_index];
+  const currentPlayerOffline = currentPlayer && !currentPlayer.is_connected;
+  const offlineElapsed = currentPlayerOffline && currentPlayer.offline_for !== null
+    ? currentPlayer.offline_for + (Date.now() - stateReceivedAt.current) / 1000
+    : 0;
+  const forceRemaining = Math.max(0, Math.ceil((gameState.force_grace_seconds ?? 15) - offlineElapsed));
+  void nowTick; // re-render driver for the countdown
 
   // Playable cards logic
   const getPlayableIndices = (): Set<number> => {
@@ -612,7 +618,6 @@ export default function GameScreen() {
   const trumpColor = SUIT_DISPLAY_COLORS[gameState.trump_suit] || '#FFF';
   const trumpSymbol = SUIT_SYMBOLS[gameState.trump_suit] || '';
   const showBiddingModal = phase === 'bidding' && isMyTurn;
-  const seatCount = opponents.length;
   const totalBids = players.filter((p) => p.has_bid).reduce((sum, p) => sum + (p.bid ?? 0), 0);
   const showTrumpSelection = phase === 'trump_selection' || phase === 'trump_selection_v3';
   const trumpCaller = players[gameState.trump_caller_index];
@@ -674,152 +679,160 @@ export default function GameScreen() {
               <Text style={styles.helpBtnText}>?</Text>
             </TouchableOpacity>
 
+            <View
+              testID="connection-dot"
+              accessibilityLabel={connected ? 'Connected' : 'Reconnecting'}
+              style={[styles.connDot, { backgroundColor: connected ? COLORS.success : COLORS.danger }]}
+            />
+
             <View style={styles.statusCluster}>
-              <StatusPill label="Trump" value={trumpSymbol || '—'} valueStyle={{ color: trumpColor }} />
-              <StatusPill label="Round" value={`${gameState.current_round}/${gameState.total_rounds}`} />
-              <StatusPill label="Cards" value={`${gameState.cards_this_round}`} />
-              <StatusPill label="Sets Completed" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
-              <StatusPill label="Total Bids" value={`${totalBids}`} />
-              <StatusPill label={connected ? 'Live' : 'Offline'} value={connected ? 'Connected' : 'Retrying'} muted={!connected} />
+              <StatusPill
+                label="Trump"
+                value={
+                  gameState.trump_suit
+                    ? `${trumpSymbol} ${gameState.trump_suit.charAt(0).toUpperCase() + gameState.trump_suit.slice(1)}`
+                    : '—'
+                }
+                valueStyle={{ color: trumpColor }}
+                primary
+              />
+              <StatusPill
+                label="Round"
+                value={`${gameState.current_round}/${gameState.total_rounds}`}
+                primary
+              />
+              <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
+              <StatusPill label="Bids" value={`${totalBids}/${gameState.cards_this_round}`} />
             </View>
           </View>
 
-          <View style={styles.opponentStage}>
-            {opponents.map((opp, index) => {
-              const oppIdx = players.findIndex((p) => p.id === opp.id);
-              const isOppTurn = gameState.current_player_index === oppIdx;
-              const isDealer = gameState.dealer_index === oppIdx;
+          <View
+            style={styles.ovalStage}
+            onLayout={(e) => setStageSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+          >
+            {stageSize.w > 0 && (() => {
+              const { width: seatW, height: seatH } = seatSize(opponents.length, stageSize.w);
+              const positions = seatPositions(opponents.length, stageSize.w, stageSize.h, seatW, seatH);
               return (
-                <View
-                  key={opp.id}
-                  testID={`opponent-${opp.id}`}
-                  style={[
-                    styles.opponentSeat,
-                    getOpponentSeatStyle(index, seatCount),
-                    isOppTurn && styles.opponentSeatActive,
-                  ]}
-                >
-                  <View style={styles.opponentSeatTop}>
-                    <View style={[styles.seatAvatar, isOppTurn && styles.seatAvatarActive]}>
-                      <Text style={styles.seatAvatarText}>{opp.name[0]?.toUpperCase()}</Text>
-                    </View>
-                    <View style={styles.opponentSeatMeta}>
-                      <View style={styles.seatNameRow}>
-                        <Text style={styles.opponentName} numberOfLines={1}>
-                          {opp.name}
-                        </Text>
-                        {isDealer && <Text style={styles.dealerBadge}>D</Text>}
+                <>
+                  <View
+                    style={[
+                      styles.tableSurface,
+                      {
+                        left: seatW * 0.5,
+                        right: seatW * 0.5,
+                        top: seatH * 0.8,
+                        bottom: seatH * 0.3,
+                        borderRadius: Math.max(60, (stageSize.h - seatH * 1.1) / 2),
+                      },
+                    ]}
+                  >
+                    {currentPlayerOffline && (phase === 'playing' || phase === 'bidding') && (
+                      <OfflineRecoveryBanner
+                        name={currentPlayer.name}
+                        remaining={forceRemaining}
+                        isHost={isHost}
+                        onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
+                      />
+                    )}
+
+                    {trickResult && (
+                      <Animated.View
+                        style={[
+                          styles.trickResultCard,
+                          {
+                            opacity: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.1, 1] }),
+                            transform: [
+                              { scale: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) },
+                            ],
+                          },
+                        ]}
+                      >
+                        <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the trick</Text>
+                      </Animated.View>
+                    )}
+
+                    {displayTrickCards && displayTrickCards.length > 0 ? (
+                      <View style={styles.trickCards}>
+                        {displayTrickCards.map((tc: any, i: number) => {
+                          const isWinner = trickResult && tc.player_index === trickResult.winner_index;
+                          return (
+                            <View key={i} style={styles.trickCardWrap}>
+                              <TrickCardEntry animate={!trickResult && i === displayTrickCards.length - 1}>
+                                <View style={isWinner ? styles.winnerHighlight : undefined}>
+                                  <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
+                                </View>
+                              </TrickCardEntry>
+                              <Text style={styles.trickCardName}>
+                                {players[tc.player_index]?.name || '?'}
+                              </Text>
+                            </View>
+                          );
+                        })}
                       </View>
-                      <Text style={styles.opponentScore} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{opp.total_score} pts</Text>
-                    </View>
+                    ) : (
+                      <Text style={styles.tableCenterLabel}>
+                        {phase === 'bidding'
+                          ? isMyTurn
+                            ? 'Your turn to bid'
+                            : `Waiting for ${currentPlayerName} to bid`
+                          : isMyTurn
+                            ? 'Your turn — play a card'
+                            : `Waiting for ${currentPlayerName} to ${gameState.current_trick.length === 0 ? 'lead' : 'play'}`}
+                      </Text>
+                    )}
+
+                    {displayTrickCards && displayTrickCards.length > 0 && !trickResult && (
+                      <Animated.Text
+                        style={[
+                          styles.tableTurnHint,
+                          isMyTurn && styles.tableTurnHintActive,
+                          { opacity: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.7, 1] }) },
+                        ]}
+                      >
+                        {isMyTurn ? 'Your turn' : `Waiting for ${currentPlayerName}`}
+                      </Animated.Text>
+                    )}
                   </View>
-                  <Text style={styles.opponentBody} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                    {opp.has_bid || opp.bid !== null
-                      ? `Bid ${opp.bid}  Won ${opp.tricks_won}`
-                      : phase === 'bidding'
-                        ? 'Waiting to bid'
-                        : `Cards ${opp.card_count}`}
-                  </Text>
-                  {!opp.is_connected && (
-                    <Text style={styles.disconnected}>Offline</Text>
-                  )}
-                </View>
-              );
-            })}
-          </View>
 
-          <View style={styles.centerStage}>
-            <Animated.View
-              style={[
-                styles.turnBanner,
-                {
-                  opacity: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.7, 1] }),
-                  transform: [
-                    {
-                      scale: turnPulse.interpolate({ inputRange: [0.2, 1], outputRange: [0.98, 1.02] }),
-                    },
-                  ],
-                },
-              ]}
-            >
-              <Text style={[styles.turnText, isMyTurn && styles.turnTextActive]}>
-                {phase === 'bidding'
-                  ? isMyTurn
-                    ? 'Your turn to bid'
-                    : `Waiting for ${currentPlayerName} to bid`
-                  : isMyTurn
-                    ? 'Your turn to play'
-                    : `Waiting for ${currentPlayerName}`}
-              </Text>
-            </Animated.View>
-
-            <View style={styles.trickTable}>
-              <View style={styles.tableHeaderRow}>
-                <Text style={styles.tableHeaderLabel}>
-                  {phase === 'bidding' ? 'Bidding round' : 'Table'}
-                </Text>
-                {gameState.current_player_index === your_index && (
-                  <Text style={styles.tableHeaderBadge}>Your move</Text>
-                )}
-              </View>
-
-              {trickResult && (
-                <Animated.View
-                  style={[
-                    styles.trickResultCard,
-                    {
-                      opacity: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.1, 1] }),
-                      transform: [
-                        {
-                          scale: trickPop.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the trick</Text>
-                </Animated.View>
-              )}
-
-              {displayTrickCards && displayTrickCards.length > 0 ? (
-                <View style={styles.trickCards}>
-                  {displayTrickCards.map((tc: any, i: number) => {
-                    const isWinner =
-                      trickResult && tc.player_index === trickResult.winner_index;
+                  {opponents.map((opp, index) => {
+                    const oppIdx = players.findIndex((p) => p.id === opp.id);
                     return (
-                      <View key={i} style={styles.trickCardWrap}>
-                        <View style={isWinner ? styles.winnerHighlight : undefined}>
-                          <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
-                        </View>
-                        <Text style={styles.trickCardName}>
-                          {players[tc.player_index]?.name || '?'}
-                        </Text>
-                      </View>
+                      <OpponentSeat
+                        key={opp.id}
+                        player={opp}
+                        isTurn={gameState.current_player_index === oppIdx}
+                        isDealer={gameState.dealer_index === oppIdx}
+                        phase={phase}
+                        style={{ ...positions[index], width: seatW, minHeight: seatH }}
+                      />
                     );
                   })}
-                </View>
-              ) : (
-                <View style={styles.emptyTrick}>
-                  <Text style={styles.emptyTrickLabel}>
-                    {phase === 'bidding' ? 'Bids are being locked in' : 'Play a card to begin'}
-                  </Text>
-                </View>
-              )}
-            </View>
+                </>
+              );
+            })()}
           </View>
 
           <View style={styles.selfDock}>
             <View style={styles.selfMeta}>
               <View>
                 <Text style={styles.selfName}>{myInfo?.name || params.player_name}</Text>
-                <Text style={styles.selfSubtext} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                  {gameState.dealer_index === your_index ? 'Dealer' : 'Player'}
+                <Text
+                  style={[
+                    styles.selfSubtext,
+                    myInfo?.bid !== null && myInfo?.bid !== undefined
+                      ? { color: BID_STATUS_COLORS[bidStatus(myInfo.bid, myInfo.tricks_won)] }
+                      : null,
+                  ]}
+                  numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
+                >
+                  {gameState.dealer_index === your_index ? 'Dealer' : ''}
                   {myInfo?.bid !== null && myInfo?.bid !== undefined
-                    ? ` • Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
-                    : ' • No bid yet'}
+                    ? `${gameState.dealer_index === your_index ? ' • ' : ''}Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
+                    : `${gameState.dealer_index === your_index ? ' • ' : ''}No bid yet`}
                 </Text>
               </View>
-              <Text style={styles.selfScore}>{myInfo?.total_score || 0} pts</Text>
+              <Text style={[styles.selfScore, { color: scoreColor(myInfo?.total_score || 0) }]}>{myInfo?.total_score || 0} pts</Text>
             </View>
           </View>
 
@@ -894,6 +907,13 @@ export default function GameScreen() {
                       </TouchableOpacity>
                     )}
                   </>
+                ) : currentPlayerOffline ? (
+                  <OfflineRecoveryBanner
+                    name={currentPlayer.name}
+                    remaining={forceRemaining}
+                    isHost={isHost}
+                    onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
+                  />
                 ) : (
                   <>
                     <ActivityIndicator size="small" color={COLORS.gold} />
@@ -998,19 +1018,60 @@ function StatusPill({
   label,
   value,
   muted,
+  primary,
   valueStyle,
 }: {
   label: string;
   value: string;
   muted?: boolean;
+  primary?: boolean;
   valueStyle?: object;
 }) {
   return (
-    <View style={[styles.statusPill, muted && styles.statusPillMuted]}>
+    <View style={[styles.statusPill, primary && styles.statusPillPrimary, muted && styles.statusPillMuted]}>
       <Text style={styles.statusPillLabel} numberOfLines={1}>{label}</Text>
-      <Text style={[styles.statusPillValue, valueStyle]} numberOfLines={1}>
+      <Text
+        style={[styles.statusPillValue, primary && styles.statusPillValuePrimary, valueStyle]}
+        numberOfLines={1}
+      >
         {value}
       </Text>
+    </View>
+  );
+}
+
+function OfflineRecoveryBanner({
+  name,
+  remaining,
+  isHost,
+  onForce,
+}: {
+  name: string;
+  remaining: number;
+  isHost: boolean;
+  onForce: () => void;
+}) {
+  return (
+    <View style={styles.offlineBanner}>
+      <Text style={styles.offlineBannerTitle}>{name} is offline</Text>
+      {remaining > 0 ? (
+        <Text style={styles.offlineBannerSub}>
+          Giving them {remaining}s to reconnect…
+        </Text>
+      ) : isHost ? (
+        <TouchableOpacity
+          testID="force-action-btn"
+          style={styles.offlineForceBtn}
+          onPress={onForce}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.offlineForceBtnText}>Play for {name}</Text>
+        </TouchableOpacity>
+      ) : (
+        <Text style={styles.offlineBannerSub}>
+          The host can play their turn for them
+        </Text>
+      )}
     </View>
   );
 }
@@ -1243,7 +1304,7 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     flexGrow: 1,
-    flexBasis: '28%',
+    flexBasis: '22%',
     paddingHorizontal: 11,
     paddingVertical: 8,
     borderRadius: 14,
@@ -1253,6 +1314,21 @@ const styles = StyleSheet.create({
   },
   statusPillMuted: {
     opacity: 0.72,
+  },
+  statusPillPrimary: {
+    borderColor: COLORS.borderAccent,
+    backgroundColor: 'rgba(212,175,55,0.08)',
+    flexBasis: '46%',
+  },
+  statusPillValuePrimary: {
+    fontSize: 15,
+  },
+  connDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
   statusPillLabel: {
     color: COLORS.textSecondary,
@@ -1267,124 +1343,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  opponentStage: {
+  ovalStage: {
+    flex: 1,
     position: 'relative',
-    height: 180,
-    marginBottom: 6,
+    marginVertical: 4,
   },
-  opponentSeat: {
+  tableSurface: {
     position: 'absolute',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    backgroundColor: 'rgba(8, 24, 17, 0.78)',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  opponentSeatActive: {
-    borderColor: COLORS.goldLight,
-    backgroundColor: 'rgba(243,229,171,0.08)',
-    shadowColor: COLORS.gold,
-    shadowOpacity: 0.28,
-  },
-  opponentSeatTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 3,
-  },
-  seatAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: COLORS.backgroundLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seatAvatarActive: {
-    backgroundColor: COLORS.gold,
-  },
-  seatAvatarText: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  opponentSeatMeta: {
-    flex: 1,
-    minWidth: 0,
-  },
-  seatNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  opponentName: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: '800',
-    flex: 1,
-  },
-  opponentScore: {
-    color: COLORS.goldLight,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  opponentBody: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  centerStage: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  turnBanner: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    marginBottom: 10,
-  },
-  trickTable: {
-    width: '100%',
-    maxWidth: 420,
-    minHeight: 160,
-    borderRadius: 26,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: COLORS.borderAccent,
-    backgroundColor: 'rgba(7, 21, 15, 0.72)',
-    padding: 14,
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    elevation: 4,
-  },
-  tableHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: 'rgba(15, 43, 29, 0.85)',
     alignItems: 'center',
-    marginBottom: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    elevation: 4,
+    overflow: 'hidden',
   },
-  tableHeaderLabel: {
-    color: COLORS.goldLight,
+  tableCenterLabel: {
+    color: COLORS.textSecondary,
     fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
-  tableHeaderBadge: {
+  tableTurnHint: {
     color: COLORS.textSecondary,
     fontSize: 11,
     fontWeight: '700',
+  },
+  tableTurnHintActive: {
+    color: COLORS.gold,
   },
   trickResultCard: {
     alignSelf: 'center',
@@ -1395,19 +1388,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(212,175,55,0.28)',
     marginBottom: 10,
-  },
-  infoBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: COLORS.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderGlass,
-  },
-  leaveBtn: {
-    padding: 6,
   },
   leaveBtnText: {
     color: COLORS.textSecondary,
@@ -1429,88 +1409,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  infoItem: {
-    alignItems: 'center',
-  },
-  infoValue: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  infoLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 10,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
-  // Opponents
-  opponentsScroll: {
-    maxHeight: 80,
-  },
-  opponentsContent: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 8,
-  },
-  oppCard: {
-    backgroundColor: COLORS.surfaceGlass,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    minWidth: 90,
-    alignItems: 'center',
-  },
-  oppCardActive: {
-    borderColor: COLORS.goldLight,
-    backgroundColor: 'rgba(243,229,171,0.08)',
-  },
-  oppTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  oppName: {
-    color: COLORS.text,
-    fontSize: 12,
-    fontWeight: '700',
-    maxWidth: 70,
-  },
-  dealerBadge: {
-    color: COLORS.gold,
-    fontSize: 10,
-    fontWeight: '800',
-    backgroundColor: 'rgba(212,175,55,0.2)',
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  oppBid: {
-    color: COLORS.textSecondary,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  oppScore: {
-    color: COLORS.goldLight,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  disconnected: {
-    color: COLORS.danger,
-    fontSize: 9,
-    fontWeight: '600',
-  },
-
   // Trick Area
-  trickArea: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
   trickWinnerText: {
     color: COLORS.gold,
     fontSize: 14,
@@ -1539,34 +1438,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: '600',
   },
-  emptyTrick: {
-    minHeight: 90,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    borderStyle: 'dashed',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-  },
-  emptyTrickLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-
-  turnText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  turnTextActive: {
-    color: COLORS.gold,
-    fontWeight: '700',
-  },
-
   selfDock: {
     paddingHorizontal: 10,
     paddingVertical: 10,
@@ -1603,21 +1474,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingBottom: 8,
   },
-  handLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-    paddingHorizontal: 6,
-  },
-  handContent: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    justifyContent: 'center',
-    gap: 6,
-  },
 
   // Error Banner
   errorBanner: {
@@ -1637,6 +1493,39 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 13,
     fontWeight: '700',
+  },
+  offlineBanner: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.35)',
+    marginBottom: 10,
+    gap: 6,
+  },
+  offlineBannerTitle: {
+    color: COLORS.danger,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  offlineBannerSub: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  offlineForceBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    backgroundColor: COLORS.gold,
+  },
+  offlineForceBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '800',
   },
 
   // === ROUND END ===
