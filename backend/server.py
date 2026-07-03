@@ -7,6 +7,7 @@ import math
 import uuid
 import random
 import string
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 from game_engine import (
@@ -18,6 +19,7 @@ from game_engine import (
 
 VARIATIONS = ('v1', 'v1.1', 'v2', 'v3')
 VALID_SUITS = ('hearts', 'spades', 'diamonds', 'clubs')
+FORCE_GRACE_SECONDS = 15
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -73,6 +75,9 @@ class GameRoom:
                 'card_count': len(p.get('hand', [])),
                 'is_connected': p.get('is_connected', True),
                 'has_bid': p.get('has_bid', False),
+                'offline_for': (time.time() - p['offline_since'])
+                    if (not p.get('is_connected', True) and p.get('offline_since'))
+                    else None,
             })
 
         restricted_bids = []
@@ -109,6 +114,7 @@ class GameRoom:
             'variation': self.variation,
             'variation_config': self.variation_config,
             'trump_caller_index': self.trump_caller_index,
+            'force_grace_seconds': FORCE_GRACE_SECONDS,
         }
 
     async def broadcast_state(self):
@@ -345,6 +351,40 @@ class GameRoom:
 
         return None
 
+    def force_action(self, host_id: str) -> Optional[str]:
+        host = next((p for p in self.players if p['id'] == host_id), None)
+        if not host or not host['is_host']:
+            return "Only the host can act for an offline player"
+        if self.phase not in ('bidding', 'playing', 'trump_selection', 'trump_selection_v3'):
+            return "Nothing to act on right now"
+        target = self.players[self.current_player_index]
+        if target.get('is_connected', True) or not target.get('offline_since'):
+            return "Current player is not offline"
+        elapsed = time.time() - target['offline_since']
+        if elapsed < FORCE_GRACE_SECONDS:
+            return f"Please wait {int(FORCE_GRACE_SECONDS - elapsed) + 1}s before acting for {target['name']}"
+
+        if self.phase == 'bidding':
+            restricted = []
+            idx = self.current_player_index
+            if idx == self.bidding_order[-1]:
+                bids_so_far = [self.players[i]['bid'] for i in self.bidding_order[:-1]]
+                restricted = get_restricted_bids(bids_so_far, self.cards_this_round)
+            bid = next(b for b in range(self.cards_this_round + 1) if b not in restricted)
+            return self.place_bid(target['id'], bid)
+
+        if self.phase == 'playing':
+            hand = target['hand']
+            lead = self.current_trick[0]['card']['suit'] if self.current_trick else None
+            card = next(c for c in hand if is_valid_play(c, hand, lead))
+            return self.play_card(target['id'], card)
+
+        if self.phase == 'trump_selection':
+            return self.call_trump(target['id'], None)  # blind draw
+
+        # trump_selection_v3 requires an explicit suit
+        return self.call_trump(target['id'], random.choice(VALID_SUITS))
+
     def _end_round(self):
         round_scores = {}
         for p in self.players:
@@ -437,6 +477,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
     existing = next((p for p in room.players if p['id'] == player_id), None)
     if existing:
         existing['is_connected'] = True
+        existing['offline_since'] = None
         existing['name'] = player_name
     else:
         if room.phase != 'waiting':
@@ -457,6 +498,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             'tricks_won': 0,
             'total_score': 0,
             'is_connected': True,
+            'offline_since': None,
         })
 
     room.connections[player_id] = websocket
@@ -514,6 +556,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 if player and player['is_host']:
                     room.start_game()
 
+            elif action == 'force_action':
+                error = room.force_action(player_id)
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
             await room.broadcast_state()
 
     except WebSocketDisconnect:
@@ -533,6 +581,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         else:
             if existing:
                 existing['is_connected'] = False
+                existing['offline_since'] = time.time()
 
         if room_id in rooms:
             await room.broadcast_state()
@@ -544,6 +593,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         existing = next((p for p in room.players if p['id'] == player_id), None)
         if existing:
             existing['is_connected'] = False
+            existing['offline_since'] = time.time()
 
 
 app.include_router(api_router)
