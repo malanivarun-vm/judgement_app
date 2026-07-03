@@ -907,6 +907,13 @@ export default function GameScreen() {
                       </TouchableOpacity>
                     )}
                   </>
+                ) : currentPlayerOffline ? (
+                  <OfflineRecoveryBanner
+                    name={currentPlayer.name}
+                    remaining={forceRemaining}
+                    isHost={isHost}
+                    onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
+                  />
                 ) : (
                   <>
                     <ActivityIndicator size="small" color={COLORS.gold} />
