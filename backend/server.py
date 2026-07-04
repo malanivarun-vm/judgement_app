@@ -16,7 +16,7 @@ from game_engine import (
     shuffle_and_deal, shuffle_and_deal_partial, sort_hand,
     get_trump_suit, get_max_cards,
     is_valid_play, determine_trick_winner, calculate_round_score,
-    get_restricted_bids
+    get_restricted_bids, RANK_VALUES
 )
 
 VARIATIONS = ('v1', 'v1.1', 'v2', 'v3')
@@ -44,6 +44,12 @@ TRICK_RESULT_BUFFER_SECONDS = 3
 ROUND_END_AUTO_SECONDS = 25
 CHAT_COOLDOWN_SECONDS = 1.5
 CHAT_MAX_LEN = 200
+BOT_PERSONALITIES = ('safe_uncle', 'chaos_goblin', 'probability_nerd')
+BOT_NAMES = {
+    'safe_uncle': 'Safe Uncle',
+    'chaos_goblin': 'Chaos Goblin',
+    'probability_nerd': 'Probability Nerd',
+}
 
 REACTIONS: Dict[str, Dict[str, str]] = {
     'laugh': {'display': '😂', 'kind': 'emoji'},
@@ -81,6 +87,7 @@ class GameRoom:
         self.creator_player_id: Optional[str] = None
         self.creator_relinquished = False
         self.players: List[Dict] = []
+        self.waiting_players: List[Dict] = []
         self.connections: Dict[str, WebSocket] = {}
         self.phase = 'waiting'
         self.current_round = 0
@@ -107,22 +114,165 @@ class GameRoom:
         self.pace = 'standard'
         self.turn_seconds = PACES['standard']
         self.last_activity = time.time()
+        self.event_log: List[Dict] = []
+        self.event_seq = 0
+        self.bot_action_at: Optional[float] = None
+
+    def _record_event(self, kind: str, **data):
+        """Append an immutable, replay-friendly game event."""
+        self.event_seq += 1
+        self.event_log.append({
+            'seq': self.event_seq,
+            'ts': time.time(),
+            'round': self.current_round,
+            'kind': kind,
+            'data': data,
+        })
+        if len(self.event_log) > 1000:
+            self.event_log = self.event_log[-1000:]
+
+    def add_bot(self, requester_id: str, personality: str) -> Optional[str]:
+        requester = next((p for p in self.players if p['id'] == requester_id), None)
+        if not requester or not requester.get('is_host'):
+            return "Only the host can add a Ghost Dealer"
+        if self.phase != 'waiting':
+            return "Bots can only be added in the lobby"
+        if personality not in BOT_PERSONALITIES:
+            return "Unknown bot personality"
+        if len(self.players) >= 7:
+            return "Room is full"
+        suffix = sum(p.get('bot_personality') == personality for p in self.players) + 1
+        self.players.append({
+            'id': f"bot_{uuid.uuid4().hex[:10]}",
+            'name': f"{BOT_NAMES[personality]} {suffix}" if suffix > 1 else BOT_NAMES[personality],
+            'is_host': False,
+            'is_bot': True,
+            'bot_personality': personality,
+            'hand': [],
+            'bid': None,
+            'has_bid': False,
+            'tricks_won': 0,
+            'total_score': 0,
+            'is_connected': True,
+            'offline_since': None,
+        })
+        self._record_event('bot_added', personality=personality)
+        return None
+
+    def remove_bot(self, requester_id: str, bot_id: str) -> Optional[str]:
+        requester = next((p for p in self.players if p['id'] == requester_id), None)
+        if not requester or not requester.get('is_host'):
+            return "Only the host can remove a Ghost Dealer"
+        if self.phase != 'waiting':
+            return "Bots can only be removed in the lobby"
+        bot = next(
+            (p for p in self.players if p['id'] == bot_id and p.get('is_bot')),
+            None,
+        )
+        if not bot:
+            return "Bot not found"
+        self.players.remove(bot)
+        self._record_event('bot_removed', bot_id=bot_id)
+        return None
 
     def _ensure_host(self):
         """Keep one connected player in control whenever possible."""
         current_host = next((p for p in self.players if p.get('is_host')), None)
-        if current_host and current_host.get('is_connected', True):
+        if (
+            current_host
+            and current_host.get('is_connected', True)
+            and not current_host.get('waiting_for_lobby')
+            and not current_host.get('left_game')
+        ):
             return
         if current_host:
             current_host['is_host'] = False
         replacement = next(
-            (p for p in self.players if p.get('is_connected', True)),
-            self.players[0] if self.players else None,
+            (
+                p for p in self.players
+                if p.get('is_connected', True)
+                and not p.get('waiting_for_lobby')
+                and not p.get('left_game')
+                and not p.get('is_bot')
+            ),
+            next((p for p in self.players if not p.get('is_bot')), None),
         )
         if replacement:
             replacement['is_host'] = True
 
+    def _all_participants(self) -> List[Dict]:
+        return [*self.players, *self.waiting_players]
+
+    def return_all_to_lobby(self):
+        """End the active game without disconnecting the room."""
+        retained = [p for p in self.players if not p.get('left_game')]
+        known_ids = {p['id'] for p in retained}
+        retained.extend(p for p in self.waiting_players if p['id'] not in known_ids)
+        self.players = retained
+        self.waiting_players = []
+
+        for player in self.players:
+            player['hand'] = []
+            player['bid'] = None
+            player['has_bid'] = False
+            player['tricks_won'] = 0
+            player['waiting_for_lobby'] = False
+            player['left_game'] = False
+            player['is_connected'] = player['id'] in self.connections or player.get('is_bot', False)
+
+        self.phase = 'waiting'
+        self.current_round = 0
+        self.total_rounds = 0
+        self.cards_this_round = 0
+        self.current_player_index = -1
+        self.current_trick = []
+        self.last_completed_trick = None
+        self.lead_suit = None
+        self.turn_deadline = None
+        self.bot_action_at = None
+        self._ensure_host()
+        self._record_event('returned_to_lobby', player_ids=[p['id'] for p in self.players])
+
+    def end_game_for_all(self, requester_id: str) -> Optional[str]:
+        requester = next((p for p in self.players if p['id'] == requester_id), None)
+        if not requester or not requester.get('is_host'):
+            return "Only the host can end the game for everyone"
+        if self.phase == 'waiting':
+            return "Everyone is already in the lobby"
+        self.return_all_to_lobby()
+        return None
+
+    def return_player_to_lobby(self, player_id: str) -> Optional[str]:
+        player = next((p for p in self.players if p['id'] == player_id), None)
+        if not player:
+            if any(p['id'] == player_id for p in self.waiting_players):
+                return None
+            return "Player not found"
+        if self.phase in ('waiting', 'game_over'):
+            return None
+
+        player['waiting_for_lobby'] = True
+        if player.get('is_host'):
+            player['is_host'] = False
+            if player_id == self.creator_player_id:
+                self.creator_relinquished = True
+            self._ensure_host()
+        self._record_event('player_returned_to_lobby', player_id=player_id)
+
+        active_humans = [p for p in self.players if not p.get('is_bot') and not p.get('left_game')]
+        if active_humans and all(p.get('waiting_for_lobby') for p in active_humans):
+            self.return_all_to_lobby()
+        else:
+            self._arm_timer()
+        return None
+
     def leave_player(self, player_id: str) -> Optional[str]:
+        waiting_player = next((p for p in self.waiting_players if p['id'] == player_id), None)
+        if waiting_player:
+            self.waiting_players.remove(waiting_player)
+            self.touch()
+            return None
+
         player = next((p for p in self.players if p['id'] == player_id), None)
         if not player:
             return "Player not found"
@@ -137,8 +287,11 @@ class GameRoom:
             player['is_connected'] = False
             player['offline_since'] = time.time()
             player['is_host'] = False
+            player['left_game'] = True
+            player['waiting_for_lobby'] = False
         self._ensure_host()
         self.touch()
+        self._record_event('player_left', player_id=player_id, name=player['name'])
         return None
 
     def set_pace(self, player_id: str, pace: str) -> Optional[str]:
@@ -169,6 +322,82 @@ class GameRoom:
             self.turn_deadline = now + ROUND_END_AUTO_SECONDS
         else:
             self.turn_deadline = None
+        self.bot_action_at = None
+        if (
+            self.phase in ('bidding', 'playing', 'trump_selection', 'trump_selection_v3')
+            and 0 <= self.current_player_index < len(self.players)
+            and (
+                self.players[self.current_player_index].get('is_bot')
+                or self.players[self.current_player_index].get('waiting_for_lobby')
+                or self.players[self.current_player_index].get('left_game')
+            )
+        ):
+            result_buffer = (
+                TRICK_RESULT_BUFFER_SECONDS
+                if self.phase == 'playing' and self.last_completed_trick and not self.current_trick
+                else 0
+            )
+            self.bot_action_at = now + result_buffer + 0.9
+
+    def _bot_bid(self, player: Dict, restricted: List[int]) -> int:
+        personality = player.get('bot_personality')
+        allowed = [b for b in range(self.cards_this_round + 1) if b not in restricted]
+        if personality == 'chaos_goblin':
+            return random.choice(allowed)
+
+        strength = 0.0
+        for card in player['hand']:
+            if card['rank'] == 'A':
+                strength += 0.85
+            elif card['rank'] == 'K':
+                strength += 0.55
+            elif card['rank'] == 'Q':
+                strength += 0.25
+            if self.trump_suit and card['suit'] == self.trump_suit:
+                strength += 0.22
+        if personality == 'safe_uncle':
+            estimate = math.floor(strength)
+        else:
+            estimate = round(strength)
+        return min(allowed, key=lambda bid: (abs(bid - estimate), bid))
+
+    def _bot_card(self, player: Dict) -> Dict:
+        lead = self.current_trick[0]['card']['suit'] if self.current_trick else None
+        legal = [card for card in player['hand'] if is_valid_play(card, player['hand'], lead)]
+        personality = player.get('bot_personality')
+        if personality == 'chaos_goblin':
+            return random.choice(legal)
+
+        def card_value(card: Dict) -> int:
+            trump_bonus = 20 if self.trump_suit and card['suit'] == self.trump_suit else 0
+            return trump_bonus + RANK_VALUES[card['rank']]
+
+        needs_trick = player['tricks_won'] < (player.get('bid') or 0)
+        if personality == 'safe_uncle':
+            return max(legal, key=card_value) if needs_trick else min(legal, key=card_value)
+
+        winning_cards = []
+        bot_index = self.players.index(player)
+        for card in legal:
+            trial = [*self.current_trick, {'player_index': bot_index, 'card': card}]
+            if determine_trick_winner(trial, self.trump_suit) == bot_index:
+                winning_cards.append(card)
+        if needs_trick and winning_cards:
+            return min(winning_cards, key=card_value)
+        return min(legal, key=card_value)
+
+    def _bot_trump(self, player: Dict) -> str:
+        if player.get('bot_personality') == 'chaos_goblin':
+            return random.choice(VALID_SUITS)
+        suit_strength = {
+            suit: sum(
+                1 + RANK_VALUES[card['rank']] / 12
+                for card in player['hand']
+                if card['suit'] == suit
+            )
+            for suit in VALID_SUITS
+        }
+        return max(VALID_SUITS, key=lambda suit: suit_strength[suit])
 
     def auto_act_current(self) -> Optional[str]:
         """Perform a safe default action for the current player (used when
@@ -186,26 +415,39 @@ class GameRoom:
                 else:
                     restricted = get_restricted_bids(bids_so_far, self.cards_this_round)
             target = self.players[idx]
-            bid = next(b for b in range(self.cards_this_round + 1) if b not in restricted)
+            bid = (
+                self._bot_bid(target, restricted)
+                if target.get('is_bot')
+                else next(b for b in range(self.cards_this_round + 1) if b not in restricted)
+            )
             return self.place_bid(target['id'], bid)
 
         if self.phase == 'playing':
             target = self.players[self.current_player_index]
             hand = target['hand']
             lead = self.current_trick[0]['card']['suit'] if self.current_trick else None
-            card = next(c for c in hand if is_valid_play(c, hand, lead))
+            card = (
+                self._bot_card(target)
+                if target.get('is_bot')
+                else next(c for c in hand if is_valid_play(c, hand, lead))
+            )
             return self.play_card(target['id'], card)
 
         if self.phase == 'trump_selection':
             target = self.players[self.trump_caller_index]
             per = self.cards_this_round - len(self.players[0].get('hand', []))
             cards_needed = len(self.players) * per
-            suit = None if len(self.remaining_deck) > cards_needed else random.choice(VALID_SUITS)
+            suit = (
+                self._bot_trump(target)
+                if target.get('is_bot')
+                else None if len(self.remaining_deck) > cards_needed else random.choice(VALID_SUITS)
+            )
             return self.call_trump(target['id'], suit)
 
         if self.phase == 'trump_selection_v3':
             target = self.players[self.trump_caller_index]
-            return self.call_trump(target['id'], random.choice(VALID_SUITS))
+            suit = self._bot_trump(target) if target.get('is_bot') else random.choice(VALID_SUITS)
+            return self.call_trump(target['id'], suit)
 
         return "Nothing to act on right now"
 
@@ -216,7 +458,8 @@ class GameRoom:
         now: Optional[float] = None,
     ) -> tuple[Optional[Dict], Optional[str]]:
         now = now if now is not None else time.time()
-        my_index = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
+        participants = self._all_participants()
+        my_index = next((i for i, p in enumerate(participants) if p['id'] == player_id), -1)
         if my_index == -1:
             return None, "Player not found"
         if not isinstance(text, str):
@@ -232,7 +475,7 @@ class GameRoom:
         return {
             'type': 'chat',
             'player_index': my_index,
-            'player_name': self.players[my_index]['name'],
+            'player_name': participants[my_index]['name'],
             'text': text,
             'ts': now,
         }, None
@@ -277,11 +520,15 @@ class GameRoom:
         ) if self.players else (now - self.last_activity > LOBBY_GRACE_SECONDS)
 
     def get_state_for_player(self, player_id: str) -> Dict:
-        player = next((p for p in self.players if p['id'] == player_id), None)
-        my_index = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
+        active_player = next((p for p in self.players if p['id'] == player_id), None)
+        waiting_player = next((p for p in self.waiting_players if p['id'] == player_id), None)
+        player = active_player or waiting_player
+        waiting_client = bool(waiting_player or (active_player and active_player.get('waiting_for_lobby')))
+        state_players = self._all_participants() if waiting_client else self.players
+        my_index = next((i for i, p in enumerate(state_players) if p['id'] == player_id), -1)
 
         players_info = []
-        for p in self.players:
+        for p in state_players:
             players_info.append({
                 'id': p['id'],
                 'name': p['name'],
@@ -293,6 +540,9 @@ class GameRoom:
                 'is_connected': p.get('is_connected', True),
                 'has_bid': p.get('has_bid', False),
                 'streak': p.get('streak', 0),
+                'is_bot': p.get('is_bot', False),
+                'bot_personality': p.get('bot_personality'),
+                'waiting_for_lobby': p.get('waiting_for_lobby', False),
                 'offline_for': (time.time() - p['offline_since'])
                     if (not p.get('is_connected', True) and p.get('offline_since'))
                     else None,
@@ -321,11 +571,12 @@ class GameRoom:
         return {
             'type': 'state',
             'room_id': self.room_id,
-            'phase': self.phase,
+            'phase': 'waiting_for_lobby' if waiting_client else self.phase,
+            'active_phase': self.phase,
             'players': players_info,
             'your_id': player_id,
             'your_index': my_index,
-            'your_hand': player.get('hand', []) if player else [],
+            'your_hand': player.get('hand', []) if player and not waiting_client else [],
             'current_round': self.current_round,
             'total_rounds': self.total_rounds,
             'cards_this_round': self.cards_this_round,
@@ -355,6 +606,11 @@ class GameRoom:
             'blind_draw_available': blind_draw_available,
             # This secret is only included in the state sent to its owner.
             'resume_token': player.get('resume_token') if player else None,
+            'event_seq': self.event_seq,
+            'recent_events': self.event_log[-30:],
+            'waiting_count': len(self.waiting_players) + sum(
+                bool(p.get('waiting_for_lobby')) for p in self.players
+            ),
         }
 
     async def broadcast_state(self):
@@ -372,7 +628,8 @@ class GameRoom:
         now: Optional[float] = None,
     ) -> Optional[Dict]:
         now = now if now is not None else time.time()
-        my_index = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
+        participants = self._all_participants()
+        my_index = next((i for i, p in enumerate(participants) if p['id'] == player_id), -1)
         if my_index == -1:
             return None
         entry = REACTIONS.get(reaction_id) if reaction_id else None
@@ -385,7 +642,7 @@ class GameRoom:
         return {
             'type': 'reaction',
             'player_index': my_index,
-            'player_name': self.players[my_index]['name'],
+            'player_name': participants[my_index]['name'],
             'reaction_id': reaction_id,
             'display': entry['display'],
             'kind': entry['kind'],
@@ -443,7 +700,14 @@ class GameRoom:
             p['total_score'] = 0
             p['streak'] = 0
         self.round_history = []
+        self.event_log = []
+        self.event_seq = 0
         self.current_round = 0
+        self._record_event(
+            'game_started',
+            variation=self.variation,
+            player_ids=[p['id'] for p in self.players],
+        )
         self._start_round()
 
     def _start_round(self):
@@ -451,6 +715,8 @@ class GameRoom:
         n = len(self.players)
         if self.variation in ('v1.1', 'v3'):
             self.cards_this_round = self.variation_config['cards_per_round']
+        elif self.variation == 'v2':
+            self.cards_this_round = self.max_cards
         else:
             self.cards_this_round = self.max_cards - (self.current_round - 1)
 
@@ -487,6 +753,12 @@ class GameRoom:
             self.trump_suit = None if self.variation == 'v3' else get_trump_suit(self.current_round)
             self.current_player_index = self.bidding_order[0]
             self.phase = 'bidding'
+        self._record_event(
+            'round_started',
+            cards=self.cards_this_round,
+            dealer_index=self.dealer_index,
+            trump=self.trump_suit,
+        )
         self._arm_timer()
 
     def call_trump(self, player_id: str, suit: Optional[str]) -> Optional[str]:
@@ -527,10 +799,13 @@ class GameRoom:
             if suit not in VALID_SUITS:
                 return "Invalid suit"
             self.trump_suit = suit
-            self.current_player_index = (self.dealer_index + 1) % len(self.players)
+            # Prediction First rewards the highest bidder with both trump
+            # control and the opening lead.
+            self.current_player_index = self.trump_caller_index
             self.phase = 'playing'
 
         self._arm_timer()
+        self._record_event('trump_called', player_id=player_id, suit=self.trump_suit)
         return None
 
     def place_bid(self, player_id: str, bid: int) -> Optional[str]:
@@ -557,6 +832,7 @@ class GameRoom:
 
         self.players[idx]['bid'] = bid
         self.players[idx]['has_bid'] = True
+        self._record_event('bid_placed', player_id=player_id, bid=bid)
 
         self.bidding_position += 1
         if self.bidding_position >= len(self.players):
@@ -616,6 +892,7 @@ class GameRoom:
             self.last_completed_trick = None
 
         self.current_trick.append({'player_index': idx, 'card': card})
+        self._record_event('card_played', player_id=player_id, card=dict(card))
 
         if len(self.current_trick) == len(self.players):
             winner_idx = determine_trick_winner(self.current_trick, self.trump_suit)
@@ -630,6 +907,12 @@ class GameRoom:
                 'winner_index': winner_idx,
                 'winner_name': self.players[winner_idx]['name'],
             }
+            self._record_event(
+                'trick_completed',
+                winner_id=self.players[winner_idx]['id'],
+                winner_index=winner_idx,
+                cards=self.last_completed_trick['cards'],
+            )
 
             if self.tricks_played >= self.cards_this_round:
                 self._end_round()
@@ -686,6 +969,7 @@ class GameRoom:
             'cards': self.cards_this_round,
             'scores': round_scores,
         })
+        self._record_event('round_completed', scores=round_scores)
 
         self.current_trick = []
 
@@ -742,8 +1026,17 @@ async def check_room(room_id: str):
     cleanup_rooms()
     rid = room_id.upper()
     exists = rid in rooms
-    joinable = exists and rooms[rid].phase == 'waiting' and len(rooms[rid].players) < 7
-    return {"exists": exists, "joinable": joinable}
+    if not exists:
+        return {"exists": False, "joinable": False, "waiting_for_lobby": False}
+    room = rooms[rid]
+    waiting_for_lobby = room.phase != 'waiting'
+    capacity = 7
+    joinable = len(room._all_participants()) < capacity
+    return {
+        "exists": True,
+        "joinable": joinable,
+        "waiting_for_lobby": waiting_for_lobby,
+    }
 
 
 # --- WebSocket Endpoint ---
@@ -768,7 +1061,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
     room.touch()
 
     # Check reconnection
-    existing = next((p for p in room.players if p['id'] == player_id), None)
+    existing = next((p for p in room._all_participants() if p['id'] == player_id), None)
     if existing:
         expected_resume_token = existing.get('resume_token', '')
         if (
@@ -788,16 +1081,14 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         if (
             player_id == room.creator_player_id
             and not room.creator_relinquished
+            and room.phase == 'waiting'
         ):
             for player in room.players:
                 player['is_host'] = player['id'] == player_id
     else:
-        if room.phase != 'waiting':
-            await websocket.send_json({"type": "error", "message": "Game already in progress"})
-            await websocket.close()
-            return
-        if len(room.players) >= 7:
-            await websocket.send_json({"type": "error", "message": "Room is full (max 7)"})
+        capacity = 7
+        if len(room._all_participants()) >= capacity:
+            await websocket.send_json({"type": "error", "message": "Room is full"})
             await websocket.close()
             return
         claims_host = (
@@ -808,7 +1099,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         if claims_host:
             room.host_claimed = True
             room.creator_player_id = player_id
-        room.players.append({
+        new_player = {
             'id': player_id,
             'name': player_name,
             'is_host': claims_host,
@@ -820,8 +1111,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             'is_connected': True,
             'offline_since': None,
             'resume_token': secrets.token_urlsafe(32),
-        })
-
+            'waiting_for_lobby': room.phase != 'waiting',
+            'left_game': False,
+        }
+        if room.phase == 'waiting':
+            room.players.append(new_player)
+        else:
+            new_player['is_host'] = False
+            room.waiting_players.append(new_player)
+            room._record_event('late_joined', player_id=player_id, name=player_name)
     previous_socket = room.connections.get(player_id)
     room.connections[player_id] = websocket
     if previous_socket and previous_socket is not websocket:
@@ -865,6 +1163,9 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 if len(room.players) < 3:
                     await websocket.send_json({"type": "error", "message": "Need at least 3 players"})
                     continue
+                if len(room.players) > 7:
+                    await websocket.send_json({"type": "error", "message": "Maximum 7 players"})
+                    continue
                 if any(not p.get('is_connected', True) for p in room.players):
                     await websocket.send_json({
                         "type": "error",
@@ -884,6 +1185,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
             elif action == 'set_pace':
                 error = room.set_pace(player_id, data.get('pace'))
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
+            elif action == 'add_bot':
+                error = room.add_bot(player_id, data.get('personality'))
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
+            elif action == 'remove_bot':
+                error = room.remove_bot(player_id, data.get('bot_id'))
                 if error:
                     await websocket.send_json({"type": "error", "message": error})
                     continue
@@ -967,6 +1280,18 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     })
                 continue
 
+            elif action == 'return_to_lobby':
+                error = room.return_player_to_lobby(player_id)
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
+            elif action == 'end_game_for_all':
+                error = room.end_game_for_all(player_id)
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+
             elif action == 'leave_room':
                 error = room.leave_player(player_id)
                 if error:
@@ -977,7 +1302,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 await websocket.send_json({"type": "leave_ack"})
                 await room.broadcast_state()
                 await websocket.close(code=1000)
-                if not room.players:
+                if not room._all_participants():
                     rooms.pop(room_id, None)
                 return
 
@@ -989,7 +1314,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
     except WebSocketDisconnect:
         logger.info(f"Player {player_name} ({player_id}) disconnected from {room_id}")
-        existing = next((p for p in room.players if p['id'] == player_id), None)
+        existing = next((p for p in room._all_participants() if p['id'] == player_id), None)
         if room.connections.get(player_id) is websocket:
             del room.connections[player_id]
 
@@ -1014,7 +1339,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         logger.error(f"WebSocket error for {player_id}: {e}")
         if room.connections.get(player_id) is websocket:
             del room.connections[player_id]
-        existing = next((p for p in room.players if p['id'] == player_id), None)
+        existing = next((p for p in room._all_participants() if p['id'] == player_id), None)
         if existing and room.connections.get(player_id) is None:
             existing['is_connected'] = False
             existing['offline_since'] = time.time()
@@ -1033,6 +1358,19 @@ async def start_room_sweeper():
             try:
                 now = time.time()
                 for room in list(rooms.values()):
+                    if room.bot_action_at is not None and now >= room.bot_action_at:
+                        bot_name = room.players[room.current_player_index]['name']
+                        error = room.auto_act_current()
+                        if error:
+                            room.bot_action_at = now + 2
+                            logger.error(f"Bot action failed in {room.room_id}: {error}")
+                        else:
+                            await room.broadcast_payload({
+                                'type': 'bot_action',
+                                'player_name': bot_name,
+                            })
+                            await room.broadcast_state()
+                        continue
                     if room.turn_deadline is None or now < room.turn_deadline:
                         continue
                     if room.phase == 'round_end':

@@ -218,7 +218,7 @@ def test_lobby_reconnect_preserves_creator_as_host():
             assert creator['is_connected'] is True
 
 
-def test_creator_reclaims_host_after_active_game_reconnect():
+def test_creator_does_not_reclaim_host_after_active_game_reconnect():
     room = GameRoom('TEST')
     add_players(room)
     room.creator_player_id = 'p0'
@@ -239,8 +239,8 @@ def test_creator_reclaims_host_after_active_game_reconnect():
             state = ws.receive_json()
             creator = next(p for p in state['players'] if p['id'] == 'p0')
             replacement = next(p for p in state['players'] if p['id'] == 'p1')
-            assert creator['is_host'] is True
-            assert replacement['is_host'] is False
+            assert creator['is_host'] is False
+            assert replacement['is_host'] is True
 
 
 def test_malformed_bid_does_not_disconnect_socket():
@@ -329,3 +329,142 @@ def test_v2_blind_draw_card_is_removed_before_second_batch():
     assert room.call_trump(caller_id, None) is None
     assert len(room.remaining_deck) == before - 1 - per_player * len(room.players)
     assert all(len(player['hand']) == room.cards_this_round for player in room.players)
+
+
+def test_host_can_add_all_ghost_dealer_personalities():
+    room = GameRoom('TEST')
+    add_players(room, 1)
+
+    for personality in ('safe_uncle', 'chaos_goblin', 'probability_nerd'):
+        assert room.add_bot('p0', personality) is None
+
+    bots = [player for player in room.players if player.get('is_bot')]
+    assert [bot['bot_personality'] for bot in bots] == [
+        'safe_uncle',
+        'chaos_goblin',
+        'probability_nerd',
+    ]
+    assert all(bot['is_connected'] for bot in bots)
+
+
+def test_non_host_cannot_add_or_remove_ghost_dealer():
+    room = GameRoom('TEST')
+    add_players(room, 2)
+
+    assert 'only the host' in room.add_bot('p1', 'safe_uncle').lower()
+    assert room.add_bot('p0', 'safe_uncle') is None
+    bot_id = next(player['id'] for player in room.players if player.get('is_bot'))
+    assert 'only the host' in room.remove_bot('p1', bot_id).lower()
+
+
+def test_ghost_dealer_auto_bids_and_records_replay_events():
+    room = GameRoom('TEST')
+    add_players(room, 1)
+    assert room.add_bot('p0', 'safe_uncle') is None
+    assert room.add_bot('p0', 'probability_nerd') is None
+    room.start_game()
+
+    bot_index = next(i for i, player in enumerate(room.players) if player.get('is_bot'))
+    room.current_player_index = bot_index
+    room.bidding_order = [
+        bot_index,
+        *[i for i in range(len(room.players)) if i != bot_index],
+    ]
+    room.bidding_position = 0
+
+    assert room.auto_act_current() is None
+    assert room.players[bot_index]['has_bid'] is True
+    kinds = [event['kind'] for event in room.event_log]
+    assert kinds[:2] == ['game_started', 'round_started']
+    assert 'bid_placed' in kinds
+    assert room.event_seq == len(room.event_log)
+
+
+def test_active_game_late_joiner_waits_outside_the_turn_order():
+    room = GameRoom('TEST')
+    add_players(room)
+    room.phase = 'playing'
+    rooms[room.room_id] = room
+
+    with TestClient(app) as client:
+        query = urlencode({
+            'player_name': 'Late Player',
+            'player_id': 'late',
+        })
+        with client.websocket_connect(f'/api/ws/{room.room_id}?{query}') as ws:
+            state = ws.receive_json()
+            assert state['phase'] == 'waiting_for_lobby'
+            assert state['active_phase'] == 'playing'
+            assert [p['id'] for p in room.players] == ['p0', 'p1', 'p2']
+            assert [p['id'] for p in room.waiting_players] == ['late']
+
+
+def test_host_can_end_active_game_for_everyone_and_include_late_joiners():
+    room = GameRoom('TEST')
+    add_players(room)
+    room.phase = 'playing'
+    room.waiting_players.append({
+        'id': 'late',
+        'name': 'Late Player',
+        'is_host': False,
+        'is_connected': True,
+        'hand': [],
+        'bid': None,
+        'has_bid': False,
+        'tricks_won': 0,
+        'total_score': 0,
+        'waiting_for_lobby': True,
+    })
+
+    assert room.end_game_for_all('p1') == 'Only the host can end the game for everyone'
+    assert room.end_game_for_all('p0') is None
+    assert room.phase == 'waiting'
+    assert room.waiting_players == []
+    assert [p['id'] for p in room.players] == ['p0', 'p1', 'p2', 'late']
+    assert all(not p.get('waiting_for_lobby') for p in room.players)
+
+
+def test_host_returning_to_lobby_transfers_control_to_next_joined_player():
+    room = GameRoom('TEST')
+    add_players(room)
+    room.phase = 'playing'
+
+    assert room.return_player_to_lobby('p0') is None
+    assert room.players[0]['waiting_for_lobby'] is True
+    assert room.players[0]['is_host'] is False
+    assert room.players[1]['is_host'] is True
+
+
+def test_prediction_first_highest_bidder_calls_trump_and_opens_play():
+    room = GameRoom('TEST')
+    add_players(room)
+    room.variation = 'v3'
+    room.variation_config = {'cards_per_round': 3, 'total_rounds': 1}
+    room.start_game()
+
+    order = room.bidding_order
+    bids = [0, 2, 0]
+    for player_index, bid in zip(order, bids):
+        assert room.place_bid(room.players[player_index]['id'], bid) is None
+
+    winner = order[1]
+    assert room.phase == 'trump_selection_v3'
+    assert room.trump_caller_index == winner
+    assert room.call_trump(room.players[winner]['id'], 'spades') is None
+    assert room.phase == 'playing'
+    assert room.current_player_index == winner
+
+
+def test_trump_call_keeps_the_same_card_count_each_round():
+    room = GameRoom('TEST')
+    add_players(room)
+    room.variation = 'v2'
+    room.max_cards = 5
+    room.total_rounds = 5
+    room.dealer_index = 0
+
+    room._start_round()
+    assert room.cards_this_round == 5
+    room.phase = 'round_end'
+    room._start_round()
+    assert room.cards_this_round == 5

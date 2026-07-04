@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
+import AnimatedScore from './AnimatedScore';
 
 interface RoundHistory {
   round: number;
@@ -77,16 +78,19 @@ export default function ScoreBoard({ roundHistory, players, currentRound }: Scor
               </Text>
               <Text style={styles.cell}>{roundData.bid}</Text>
               <Text style={styles.cell}>{roundData.tricks_won}</Text>
-              <Text style={[
-                styles.cell,
-                styles.scoreCell,
-                { color: success ? COLORS.success : COLORS.danger }
-              ]}>
-                {roundData.round_score > 0 ? '+' : ''}{roundData.round_score}
-              </Text>
-              <Text style={[styles.cell, styles.totalCol, styles.totalValue]}>
-                {roundData.total_score}
-              </Text>
+              <AnimatedScore
+                value={roundData.round_score}
+                signed
+                style={[
+                  styles.cell,
+                  styles.scoreCell,
+                  { color: success ? COLORS.success : COLORS.danger },
+                ]}
+              />
+              <AnimatedScore
+                value={roundData.total_score}
+                style={[styles.cell, styles.totalCol, styles.totalValue]}
+              />
             </View>
           );
         })}

@@ -31,7 +31,15 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (Platform.OS === 'web' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
+      if (__DEV__) {
+        // A cache-first service worker makes localhost appear to ignore fresh
+        // code. Remove old registrations while developing.
+        void navigator.serviceWorker.getRegistrations()
+          .then((registrations) => Promise.all(registrations.map((entry) => entry.unregister())))
+          .catch(() => {});
+      } else {
+        void navigator.serviceWorker.register('/sw.js');
+      }
     }
   }, []);
 

@@ -1,18 +1,40 @@
-import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, SafeAreaView, BackHandler } from 'react-native';
+import { useNavigation, useRouter } from 'expo-router';
 import { COLORS } from '../utils/theme';
 import { VARIATIONS } from '../utils/variations';
 import ModeCard from '../components/ModeCard';
 
 export default function GameModesScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+  const navigatingHome = useRef(false);
+  const goHome = useCallback(() => {
+    navigatingHome.current = true;
+    router.replace('/');
+  }, [router]);
+
+  useEffect(() => {
+    const hardwareBack = BackHandler.addEventListener('hardwareBackPress', () => {
+      goHome();
+      return true;
+    });
+    const removeBefore = navigation.addListener('beforeRemove', (event) => {
+      if (navigatingHome.current) return;
+      event.preventDefault();
+      goHome();
+    });
+    return () => {
+      hardwareBack.remove();
+      removeBefore();
+    };
+  }, [goHome, navigation]);
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={goHome}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           <Text style={styles.back}>← Back</Text>

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { COLORS } from '../utils/theme';
 import { bidStatus, BID_STATUS_COLORS, BID_STATUS_LABELS, scoreColor } from '../utils/bidStatus';
+import AnimatedScore from './AnimatedScore';
 
 export interface SeatPlayer {
   id: string;
@@ -22,6 +23,8 @@ export interface SeatPlayer {
   card_count: number;
   is_connected: boolean;
   streak?: number;
+  is_bot?: boolean;
+  bot_personality?: string | null;
 }
 
 interface Props {
@@ -34,7 +37,10 @@ interface Props {
 
 export default function OpponentSeat({ player, isTurn, isDealer, phase, style }: Props) {
   const focus = useRef(new Animated.Value(isTurn ? 1 : 0)).current;
+  const reactionPop = useRef(new Animated.Value(0)).current;
+  const previousTricks = useRef(player.tricks_won);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [reaction, setReaction] = useState('');
   const hasBid = player.has_bid || player.bid !== null;
   const st = hasBid ? bidStatus(player.bid, player.tricks_won) : 'pending';
   const statusLabel = BID_STATUS_LABELS[st];
@@ -56,6 +62,26 @@ export default function OpponentSeat({ player, isTurn, isDealer, phase, style }:
     }).start();
   }, [focus, isTurn, reduceMotion]);
 
+  useEffect(() => {
+    let nextReaction = '';
+    if (player.tricks_won > previousTricks.current) nextReaction = '✦';
+    if (st === 'secured' && player.tricks_won > previousTricks.current) nextReaction = '🎯';
+    if (st === 'busted') nextReaction = '💥';
+    previousTricks.current = player.tricks_won;
+    if (!nextReaction) return;
+
+    setReaction(nextReaction);
+    reactionPop.setValue(reduceMotion ? 1 : 0);
+    Animated.spring(reactionPop, {
+      toValue: 1,
+      speed: 18,
+      bounciness: 12,
+      useNativeDriver: true,
+    }).start();
+    const timer = setTimeout(() => setReaction(''), 1200);
+    return () => clearTimeout(timer);
+  }, [player.tricks_won, reactionPop, reduceMotion, st]);
+
   return (
     <Animated.View
       testID={`opponent-${player.id}`}
@@ -74,7 +100,9 @@ export default function OpponentSeat({ player, isTurn, isDealer, phase, style }:
     >
       <View style={styles.topRow}>
         <View style={[styles.avatar, isTurn && styles.avatarActive]}>
-          <Text style={styles.avatarText}>{player.name[0]?.toUpperCase()}</Text>
+          <Text style={styles.avatarText}>
+            {player.is_bot ? '♟' : player.name[0]?.toUpperCase()}
+          </Text>
         </View>
         <Text style={styles.name} numberOfLines={1}>{player.name}</Text>
         {(player.streak ?? 0) >= 2 && (
@@ -92,11 +120,29 @@ export default function OpponentSeat({ player, isTurn, isDealer, phase, style }:
             {phase === 'bidding' ? 'bidding…' : `${player.card_count} cards`}
           </Text>
         )}
-        <Text style={[styles.score, { color: scoreColor(player.total_score) }]} numberOfLines={1}>
-          {player.total_score}
-        </Text>
+        <AnimatedScore
+          value={player.total_score}
+          style={[styles.score, { color: scoreColor(player.total_score) }]}
+        />
       </View>
       {!player.is_connected && <Text style={styles.offline}>Offline</Text>}
+      {reaction ? (
+        <Animated.Text
+          pointerEvents="none"
+          style={[
+            styles.reaction,
+            {
+              opacity: reactionPop,
+              transform: [
+                { translateY: reactionPop.interpolate({ inputRange: [0, 1], outputRange: [8, -22] }) },
+                { scale: reactionPop.interpolate({ inputRange: [0, 0.7, 1], outputRange: [0.4, 1.35, 1] }) },
+              ],
+            },
+          ]}
+        >
+          {reaction}
+        </Animated.Text>
+      ) : null}
     </Animated.View>
   );
 }
@@ -195,5 +241,13 @@ const styles = StyleSheet.create({
     color: COLORS.danger,
     fontSize: 9,
     fontWeight: '700',
+  },
+  reaction: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: 0,
+    fontSize: 23,
+    textShadowColor: 'rgba(212,175,55,0.8)',
+    textShadowRadius: 12,
   },
 });

@@ -5,18 +5,20 @@ import {
   TouchableOpacity,
   ScrollView,
   StyleSheet,
-  Alert,
   Share,
   ActivityIndicator,
   Animated,
   Easing,
   AccessibilityInfo,
   AppState,
+  Alert,
+  BackHandler,
+  Modal,
   Platform,
   StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
@@ -37,27 +39,18 @@ import ChatDrawer, { FeedItem } from '../components/ChatDrawer';
 import TurnClock, { DANGER_AT_SECONDS } from '../components/TurnClock';
 import GoldRain from '../components/GoldRain';
 import SirenVignette from '../components/SirenVignette';
+import AnimatedScore from '../components/AnimatedScore';
+import BidTensionMeter from '../components/BidTensionMeter';
+import DealDeck from '../components/DealDeck';
+import TrumpCinematic from '../components/TrumpCinematic';
+import TravelingTurnMarker from '../components/TravelingTurnMarker';
 import {
   BACKEND_CONFIG_ERROR,
   BACKEND_URL,
   buildWebSocketUrl,
 } from '../utils/backend';
 import { seatPositions, seatSize } from '../utils/tableLayout';
-import { useCardSound } from '../utils/useCardSound';
-
-/** Alert.alert is a silent no-op on react-native-web — use window.confirm there. */
-function confirmDialog(title: string, message: string, onConfirm: () => void) {
-  if (Platform.OS === 'web') {
-    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) {
-      onConfirm();
-    }
-    return;
-  }
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: 'Leave', style: 'destructive', onPress: onConfirm },
-  ]);
-}
+import { SoundPack, useTableSound } from '../utils/useCardSound';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
@@ -65,6 +58,7 @@ interface GameState {
   type: string;
   room_id: string;
   phase: string;
+  active_phase?: string;
   players: {
     id: string;
     name: string;
@@ -77,6 +71,9 @@ interface GameState {
     has_bid: boolean;
     offline_for: number | null;
     streak: number;
+    is_bot?: boolean;
+    bot_personality?: string | null;
+    waiting_for_lobby?: boolean;
   }[];
   your_id: string;
   your_index: number;
@@ -103,6 +100,15 @@ interface GameState {
   pace: string;
   blind_draw_available: boolean;
   resume_token?: string | null;
+  event_seq: number;
+  recent_events: {
+    seq: number;
+    ts: number;
+    round: number;
+    kind: string;
+    data: Record<string, unknown>;
+  }[];
+  waiting_count: number;
 }
 
 const PACE_OPTIONS = [
@@ -110,6 +116,19 @@ const PACE_OPTIONS = [
   { key: 'standard', label: '⚡ Standard', desc: '15s per move' },
   { key: 'blitz', label: '🔥 Blitz', desc: '7s — pure adrenaline' },
 ] as const;
+
+const BOT_OPTIONS = [
+  { key: 'safe_uncle', name: 'Safe Uncle', icon: '🛡', desc: 'Conservative and hard to bait' },
+  { key: 'chaos_goblin', name: 'Chaos Goblin', icon: '🎲', desc: 'Unpredictable by design' },
+  { key: 'probability_nerd', name: 'Probability Nerd', icon: '🧠', desc: 'Counts strength and plays efficiently' },
+] as const;
+
+const SOUND_PACKS: { key: SoundPack; label: string; icon: string }[] = [
+  { key: 'luxury', label: 'Luxury', icon: '♛' },
+  { key: 'indian', label: 'Game Night', icon: '🪘' },
+  { key: 'minimal', label: 'Minimal', icon: '◌' },
+  { key: 'chaotic', label: 'Chaotic', icon: '⚡' },
+];
 
 export default function GameScreen() {
   const params = useLocalSearchParams<{
@@ -119,6 +138,7 @@ export default function GameScreen() {
     host_token?: string;
   }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<any>(null);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,14 +163,21 @@ export default function GameScreen() {
   const ambientPulse = useRef(new Animated.Value(0)).current;
   const turnPulse = useRef(new Animated.Value(0)).current;
   const trickPop = useRef(new Animated.Value(0)).current;
+  const trickCollect = useRef(new Animated.Value(0)).current;
   const reduceMotionRef = useRef(false);
   const [nowTick, setNowTick] = useState(0);
   const stateReceivedAt = useRef(Date.now());
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
-  const playCardSound = useCardSound();
+  const [soundPack, setSoundPack] = useState<SoundPack>('luxury');
+  const tableSound = useTableSound(soundPack);
+  const playCardSound = tableSound.card;
+  const playTrickSound = tableSound.trick;
+  const playDealSound = tableSound.deal;
+  const playTrumpSound = tableSound.trump;
   const prevTrickLenRef = useRef(0);
   const pendingActionRef = useRef<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [leaveMenuOpen, setLeaveMenuOpen] = useState(false);
 
   // === Table Talk (chat + live event feed) ===
   const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -183,6 +210,16 @@ export default function GameScreen() {
     AccessibilityInfo.isReduceMotionEnabled()
       .then(setReduceMotion)
       .catch(() => setReduceMotion(false));
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem('judgement_sound_pack')
+      .then((saved) => {
+        if (saved && SOUND_PACKS.some((pack) => pack.key === saved)) {
+          setSoundPack(saved as SoundPack);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -421,16 +458,27 @@ export default function GameScreen() {
               });
               if (!reduceMotionRef.current) {
                 trickPop.setValue(0);
+                trickCollect.setValue(0);
                 Animated.timing(trickPop, {
                   toValue: 1,
                   duration: 260,
                   easing: Easing.out(Easing.cubic),
                   useNativeDriver: true,
                 }).start();
+                Animated.sequence([
+                  Animated.delay(760),
+                  Animated.timing(trickCollect, {
+                    toValue: 1,
+                    duration: 560,
+                    easing: Easing.inOut(Easing.cubic),
+                    useNativeDriver: true,
+                  }),
+                ]).start();
               }
               void fireHaptic('success');
+              playTrickSound();
               if (trickResultTimer.current) clearTimeout(trickResultTimer.current);
-              trickResultTimer.current = setTimeout(() => setTrickResult(null), 2500);
+              trickResultTimer.current = setTimeout(() => setTrickResult(null), 1650);
             }
           }
         } else if (data.type === 'error') {
@@ -474,6 +522,11 @@ export default function GameScreen() {
             kind: 'timeout',
             text: `⏱ ${data.player_name} ran out of time — auto-played`,
           });
+        } else if (data.type === 'bot_action') {
+          pushFeed({
+            kind: 'event',
+            text: `♟ ${data.player_name} makes its move`,
+          });
         } else if (data.type === 'leave_ack') {
           intentionalClose.current = true;
           if (leaveTimer.current) clearTimeout(leaveTimer.current);
@@ -485,7 +538,7 @@ export default function GameScreen() {
         // ignore parse errors
       }
     };
-  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.host_token, resumeStorageKey, router, trickPop, playCardSound, pushFeed]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.host_token, resumeStorageKey, router, trickCollect, trickPop, playCardSound, playTrickSound, pushFeed]);
 
   useEffect(() => {
     let active = true;
@@ -556,28 +609,32 @@ export default function GameScreen() {
     }
   };
 
-  const handleLeave = () => {
-    confirmDialog('Leave Game', 'Are you sure you want to leave?', () => {
-      intentionalClose.current = true;
-      if (ws.current?.readyState === WebSocket.OPEN) {
-        ws.current.send(JSON.stringify({ action: 'leave_room' }));
-        leaveTimer.current = setTimeout(() => {
-          void AsyncStorage.removeItem(resumeStorageKey).catch(() => {});
-          ws.current?.close();
-          router.replace('/');
-        }, 800);
-      } else {
+  const exitGame = () => {
+    setLeaveMenuOpen(false);
+    intentionalClose.current = true;
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ action: 'leave_room' }));
+      leaveTimer.current = setTimeout(() => {
         void AsyncStorage.removeItem(resumeStorageKey).catch(() => {});
         ws.current?.close();
         router.replace('/');
-      }
-    });
+      }, 800);
+    } else {
+      void AsyncStorage.removeItem(resumeStorageKey).catch(() => {});
+      ws.current?.close();
+      router.replace('/');
+    }
+  };
+
+  const handleLeave = () => {
+    setLeaveMenuOpen(true);
   };
 
   const sendAction = async (action: any, haptic: 'selection' | 'light' | 'medium' | 'success' = 'selection') => {
     const guardedActions = new Set([
       'start_game', 'place_bid', 'play_card', 'call_trump',
-      'next_round', 'new_game', 'force_action',
+      'next_round', 'new_game', 'force_action', 'add_bot', 'remove_bot',
+      'return_to_lobby', 'end_game_for_all',
     ]);
     if (ws.current?.readyState !== WebSocket.OPEN) {
       setError('Reconnecting — your move was not sent');
@@ -591,6 +648,32 @@ export default function GameScreen() {
     await fireHaptic(haptic);
     send(action);
   };
+
+  const returnToLobby = () => {
+    setLeaveMenuOpen(false);
+    void sendAction({ action: 'return_to_lobby' }, 'medium');
+  };
+
+  const endGameForAll = () => {
+    setLeaveMenuOpen(false);
+    void sendAction({ action: 'end_game_for_all' }, 'medium');
+  };
+
+  useEffect(() => {
+    const hardwareBack = BackHandler.addEventListener('hardwareBackPress', () => {
+      setLeaveMenuOpen(true);
+      return true;
+    });
+    const removeBefore = navigation.addListener('beforeRemove', (event) => {
+      if (intentionalClose.current) return;
+      event.preventDefault();
+      setLeaveMenuOpen(true);
+    });
+    return () => {
+      hardwareBack.remove();
+      removeBefore();
+    };
+  }, [navigation]);
 
   const removeReaction = useCallback((key: string) => {
     setReactions((prev) => prev.filter((reaction) => reaction.key !== key));
@@ -640,15 +723,22 @@ export default function GameScreen() {
       }
       void fireHaptic('success');
       if (bidLockTimer.current) clearTimeout(bidLockTimer.current);
-      bidLockTimer.current = setTimeout(() => setShowBidLock(false), 4000);
+      bidLockTimer.current = setTimeout(() => setShowBidLock(false), 2400);
     }
 
     if ((prev === 'trump_selection' || prev === 'trump_selection_v3') && gameState.trump_suit) {
       setTrumpReveal(gameState.trump_suit);
+      playTrumpSound();
       if (trumpRevealTimer.current) clearTimeout(trumpRevealTimer.current);
-      trumpRevealTimer.current = setTimeout(() => setTrumpReveal(null), 1500);
+      trumpRevealTimer.current = setTimeout(() => setTrumpReveal(null), 1700);
     }
-  }, [gameState, bidLockAnim, fireHaptic]);
+  }, [gameState, bidLockAnim, fireHaptic, playTrumpSound]);
+
+  const currentRoundForSound = gameState?.current_round ?? 0;
+  useEffect(() => {
+    if (currentRoundForSound <= 0) return;
+    playDealSound();
+  }, [currentRoundForSound, playDealSound]);
 
   useEffect(() => {
     return () => {
@@ -700,7 +790,12 @@ export default function GameScreen() {
   const myInfo = players[your_index] || players.find((p) => p.id === your_id);
   const currentPlayerName = players[gameState.current_player_index]?.name || '';
   const isMyTurn = gameState.current_player_index === your_index;
-  const opponents = players.filter((p) => p.id !== your_id);
+  const opponents = players.length > 1
+    ? Array.from(
+        { length: players.length - 1 },
+        (_, offset) => players[(your_index + offset + 1) % players.length],
+      )
+    : [];
   const currentPlayer = players[gameState.current_player_index];
   const currentPlayerOffline = currentPlayer && !currentPlayer.is_connected;
   const offlineElapsed = currentPlayerOffline && currentPlayer.offline_for !== null
@@ -714,6 +809,19 @@ export default function GameScreen() {
     ? Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000))
     : null;
   const timerTotal = timerTotalRef.current;
+  const effectivePhase = gameState.active_phase || phase;
+  const activeGameForLeave = !['waiting', 'waiting_for_lobby', 'game_over'].includes(effectivePhase);
+  const leaveModal = (
+    <LeaveOptionsModal
+      visible={leaveMenuOpen}
+      isHost={isHost}
+      activeGame={activeGameForLeave}
+      onLobby={returnToLobby}
+      onEndAll={endGameForAll}
+      onExit={exitGame}
+      onCancel={() => setLeaveMenuOpen(false)}
+    />
+  );
   const sendChat = (text: string) => {
     if (ws.current?.readyState !== WebSocket.OPEN) {
       setError('Message not sent while reconnecting');
@@ -734,6 +842,70 @@ export default function GameScreen() {
     return new Set(hand.map((_, i) => i));
   };
   const playableIndices = getPlayableIndices();
+
+  if (phase === 'waiting_for_lobby') {
+    const selectedVariation = VARIATIONS.find((item) => item.key === gameState.variation) || VARIATIONS[0];
+    return (
+      <SafeAreaView style={styles.container}>
+        <TouchableOpacity testID="leave-waiting-btn" style={styles.backBtn} onPress={handleLeave}>
+          <Text style={styles.backBtnText}>← Leave</Text>
+        </TouchableOpacity>
+        <ScrollView contentContainerStyle={styles.waitingLobbyWrap}>
+          <Text style={styles.lobbyKicker}>GAME LOBBY</Text>
+          <Text style={styles.lobbyTitle}>Waiting Room</Text>
+          <View style={styles.waitingMessageCard}>
+            <ActivityIndicator color={COLORS.gold} />
+            <Text style={styles.waitingMessage}>
+              Waiting for the host and other users to come back to Lobby
+            </Text>
+            <Text style={styles.waitingMessageSub}>
+              The current {selectedVariation.name} game is still in progress. You’ll be included
+              when the table starts a fresh game.
+            </Text>
+          </View>
+
+          <Text style={styles.playerCountText}>Room members ({players.length})</Text>
+          <View style={styles.playerList}>
+            {players.map((player) => (
+              <View key={player.id} style={styles.playerItem}>
+                <View style={[styles.avatar, player.id === your_id && styles.avatarYou]}>
+                  <Text style={styles.avatarText}>{player.is_bot ? '♟' : player.name[0]?.toUpperCase()}</Text>
+                </View>
+                <Text style={styles.playerName}>{player.name}</Text>
+                {player.is_host && (
+                  <View style={styles.badge}><Text style={styles.badgeText}>HOST</Text></View>
+                )}
+                {player.waiting_for_lobby && (
+                  <View style={[styles.badge, styles.badgeYou]}><Text style={styles.badgeText}>LOBBY</Text></View>
+                )}
+              </View>
+            ))}
+          </View>
+
+          <Text style={styles.variationLabel}>GAME MODE — LOCKED DURING PLAY</Text>
+          <View style={styles.disabledPicker}>
+            {VARIATIONS.map((variation) => (
+              <View
+                key={variation.key}
+                style={[
+                  styles.variationOption,
+                  variation.key === gameState.variation && styles.variationOptionSelected,
+                ]}
+              >
+                <Text style={styles.variationName}>{variation.name}</Text>
+                <Text style={styles.variationDesc}>{variation.desc}</Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={styles.lobbyChatWrap}>
+            <ChatDrawer inline items={feed} onSend={sendChat} />
+          </View>
+        </ScrollView>
+        {leaveModal}
+      </SafeAreaView>
+    );
+  }
 
   // === WAITING / LOBBY ===
   if (phase === 'waiting') {
@@ -826,7 +998,7 @@ export default function GameScreen() {
                 style={[styles.playerItem, !p.is_connected && styles.playerItemAway]}
               >
                 <View style={[styles.avatar, p.id === your_id && styles.avatarYou]}>
-                  <Text style={styles.avatarText}>{p.name[0]?.toUpperCase()}</Text>
+                  <Text style={styles.avatarText}>{p.is_bot ? '♟' : p.name[0]?.toUpperCase()}</Text>
                 </View>
                 <Text style={styles.playerName}>{p.name}</Text>
                 {!p.is_connected && (
@@ -844,9 +1016,45 @@ export default function GameScreen() {
                     <Text style={styles.badgeText}>YOU</Text>
                   </View>
                 )}
+                {isHost && p.is_bot && (
+                  <TouchableOpacity
+                    testID={`remove-bot-${p.id}`}
+                    style={styles.removeBotBtn}
+                    onPress={() => void sendAction({ action: 'remove_bot', bot_id: p.id }, 'light')}
+                  >
+                    <Text style={styles.removeBotText}>×</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </View>
+
+          {isHost && players.length < 7 && (
+            <View style={styles.ghostDealerSection}>
+              <View style={styles.ghostDealerHeader}>
+                <Text style={styles.variationLabel}>GHOST DEALERS</Text>
+                <Text style={styles.ghostDealerHint}>Fill an empty seat</Text>
+              </View>
+              <View style={styles.botGrid}>
+                {BOT_OPTIONS.map((bot) => (
+                  <TouchableOpacity
+                    key={bot.key}
+                    testID={`add-bot-${bot.key}`}
+                    style={styles.botOption}
+                    disabled={pendingAction === 'add_bot'}
+                    onPress={() => void sendAction({
+                      action: 'add_bot',
+                      personality: bot.key,
+                    }, 'medium')}
+                  >
+                    <Text style={styles.botIcon}>{bot.icon}</Text>
+                    <Text style={styles.botName}>{bot.name}</Text>
+                    <Text style={styles.botDesc}>{bot.desc}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
 
           <View style={styles.variationSection}>
             <Text style={styles.variationLabel}>GAME VARIATION</Text>
@@ -939,6 +1147,32 @@ export default function GameScreen() {
             </View>
           </View>
 
+          <View style={styles.variationSection}>
+            <Text style={styles.variationLabel}>YOUR SOUND PACK</Text>
+            <View style={styles.soundPackRow}>
+              {SOUND_PACKS.map((pack) => {
+                const selected = soundPack === pack.key;
+                return (
+                  <TouchableOpacity
+                    key={pack.key}
+                    testID={`sound-pack-${pack.key}`}
+                    style={[styles.soundPackChip, selected && styles.soundPackChipSelected]}
+                    onPress={() => {
+                      setSoundPack(pack.key);
+                      void AsyncStorage.setItem('judgement_sound_pack', pack.key).catch(() => {});
+                      void fireHaptic('selection');
+                    }}
+                  >
+                    <Text style={styles.soundPackIcon}>{pack.icon}</Text>
+                    <Text style={selected ? styles.soundPackLabelSelected : styles.soundPackLabel}>
+                      {pack.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
           <View style={styles.lobbyChatWrap}>
             <ChatDrawer inline items={feed} onSend={sendChat} />
           </View>
@@ -982,6 +1216,7 @@ export default function GameScreen() {
           reduceMotion={reduceMotion}
           onDone={removeReaction}
         />
+        {leaveModal}
       </SafeAreaView>
     );
   }
@@ -1019,31 +1254,38 @@ export default function GameScreen() {
 
           <View style={styles.gameOverBtns}>
             {isHost && (
-              <TouchableOpacity
-                testID="new-game-btn"
-                style={styles.goldButton}
-                onPress={() => void sendAction({ action: 'new_game' }, 'medium')}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.goldButtonText}>Play Again</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  testID="new-game-btn"
+                  style={styles.goldButton}
+                  onPress={() => void sendAction({ action: 'new_game' }, 'medium')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.goldButtonText}>Play Again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="choose-mode-btn"
+                  style={styles.outlineButton}
+                  onPress={endGameForAll}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.outlineButtonText}>Choose a New Mode</Text>
+                </TouchableOpacity>
+              </>
             )}
             <TouchableOpacity
               testID="home-btn"
               style={styles.outlineButton}
-              onPress={() => {
-                intentionalClose.current = true;
-                ws.current?.close();
-                router.replace('/');
-              }}
+              onPress={exitGame}
               activeOpacity={0.8}
             >
               <Text style={styles.outlineButtonText}>Back to Home</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
-        <GoldRain reduceMotion={reduceMotion} />
-      </SafeAreaView>
+          <GoldRain reduceMotion={reduceMotion} />
+          {leaveModal}
+        </SafeAreaView>
     );
   }
 
@@ -1084,6 +1326,7 @@ export default function GameScreen() {
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </ScrollView>
+        {leaveModal}
       </SafeAreaView>
     );
   }
@@ -1095,6 +1338,7 @@ export default function GameScreen() {
   const trumpSymbol = gameState.trump_suit ? SUIT_SYMBOLS[gameState.trump_suit] || '' : '—';
   const showBiddingModal = phase === 'bidding' && isMyTurn;
   const totalBids = players.filter((p) => p.has_bid).reduce((sum, p) => sum + (p.bid ?? 0), 0);
+  const activeModeName = VARIATIONS.find((item) => item.key === gameState.variation)?.name || 'Classic';
   const showTrumpSelection = phase === 'trump_selection' || phase === 'trump_selection_v3';
   const trumpCaller = players[gameState.trump_caller_index];
   const iAmTrumpCaller = gameState.trump_caller_index === your_index;
@@ -1104,6 +1348,13 @@ export default function GameScreen() {
   const displayTrickCards = trickResult
     ? trickResult.cards
     : gameState.current_trick;
+  const winnerRelative = trickResult
+    ? (trickResult.winner_index - your_index + players.length) % players.length
+    : 0;
+  const collectToX = winnerRelative === 0
+    ? 0
+    : winnerRelative <= players.length / 2 ? -145 : 145;
+  const collectToY = winnerRelative === 0 ? 170 : -115;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1200,13 +1451,27 @@ export default function GameScreen() {
               />
               <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
               <StatusPill label="Bids" value={`${totalBids}/${gameState.cards_this_round}`} />
+              <StatusPill label="Mode" value={activeModeName} />
+              {gameState.waiting_count > 0 && (
+                <StatusPill label="Lobby" value={`${gameState.waiting_count} waiting`} />
+              )}
             </View>
+            <BidTensionMeter total={totalBids} available={gameState.cards_this_round} />
           </View>
 
           <View
             style={styles.ovalStage}
             onLayout={(e) => setStageSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
           >
+            <DealDeck
+              round={gameState.current_round}
+              active={
+                (phase === 'bidding' && totalBids === 0)
+                || phase === 'trump_selection'
+                || phase === 'trump_selection_v3'
+              }
+              reduceMotion={reduceMotion}
+            />
             {stageSize.w > 0 && (() => {
               const { width: seatW, height: seatH } = seatSize(opponents.length, stageSize.w);
               const positions = seatPositions(opponents.length, stageSize.w, stageSize.h, seatW, seatH);
@@ -1250,7 +1515,37 @@ export default function GameScreen() {
                     )}
 
                     {displayTrickCards && displayTrickCards.length > 0 ? (
-                      <View style={styles.trickCards}>
+                      <Animated.View
+                        style={[
+                          styles.trickCards,
+                          trickResult && {
+                            opacity: trickCollect.interpolate({
+                              inputRange: [0, 0.72, 1],
+                              outputRange: [1, 1, 0],
+                            }),
+                            transform: [
+                              {
+                                translateX: trickCollect.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [0, collectToX],
+                                }),
+                              },
+                              {
+                                translateY: trickCollect.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [0, collectToY],
+                                }),
+                              },
+                              {
+                                scale: trickCollect.interpolate({
+                                  inputRange: [0, 0.6, 1],
+                                  outputRange: [1, 1.08, 0.38],
+                                }),
+                              },
+                            ],
+                          },
+                        ]}
+                      >
                         {displayTrickCards.map((tc: any, i: number) => {
                           const isWinner = trickResult && tc.player_index === trickResult.winner_index;
                           return (
@@ -1271,7 +1566,7 @@ export default function GameScreen() {
                             </View>
                           );
                         })}
-                      </View>
+                      </Animated.View>
                     ) : (
                       <Text style={styles.tableCenterLabel}>
                         {phase === 'bidding'
@@ -1310,6 +1605,45 @@ export default function GameScreen() {
                       />
                     );
                   })}
+                  {(() => {
+                    const current = players[gameState.current_player_index];
+                    const opponentIndex = opponents.findIndex((p) => p.id === current?.id);
+                    const turnTarget = opponentIndex >= 0
+                      ? {
+                          x: positions[opponentIndex].left + seatW / 2 - 9,
+                          y: positions[opponentIndex].top - 13,
+                        }
+                      : {
+                          x: stageSize.w / 2 - 9,
+                          y: stageSize.h - 30,
+                        };
+                    const dealer = players[gameState.dealer_index];
+                    const dealerOpponentIndex = opponents.findIndex((p) => p.id === dealer?.id);
+                    const dealerTarget = dealerOpponentIndex >= 0
+                      ? {
+                          x: positions[dealerOpponentIndex].left + seatW / 2 - 9,
+                          y: positions[dealerOpponentIndex].top + seatH - 5,
+                        }
+                      : {
+                          x: stageSize.w / 2 + 24,
+                          y: stageSize.h - 32,
+                        };
+                    return (
+                      <>
+                        <TravelingTurnMarker
+                          x={turnTarget.x}
+                          y={turnTarget.y}
+                          reduceMotion={reduceMotion}
+                        />
+                        <TravelingTurnMarker
+                          x={dealerTarget.x}
+                          y={dealerTarget.y}
+                          reduceMotion={reduceMotion}
+                          variant="dealer"
+                        />
+                      </>
+                    );
+                  })()}
                 </>
               );
             })()}
@@ -1352,7 +1686,11 @@ export default function GameScreen() {
                 </Text>
               </View>
               <ReactionTray onSend={(id) => void sendAction({ action: 'reaction', reaction_id: id }, 'light')} />
-              <Text style={[styles.selfScore, { color: scoreColor(myInfo?.total_score || 0) }]}>{myInfo?.total_score || 0} pts</Text>
+              <AnimatedScore
+                value={myInfo?.total_score || 0}
+                suffix=" pts"
+                style={[styles.selfScore, { color: scoreColor(myInfo?.total_score || 0) }]}
+              />
             </View>
           </View>
 
@@ -1383,6 +1721,9 @@ export default function GameScreen() {
             currentRound={gameState.current_round}
             totalRounds={gameState.total_rounds}
             restrictedBids={gameState.restricted_bids || []}
+            priorBids={players
+              .filter((player) => player.has_bid && player.bid !== null)
+              .map((player) => ({ id: player.id, name: player.name, bid: player.bid as number }))}
             onPlaceBid={(bid) => void sendAction({ action: 'place_bid', bid }, 'medium')}
             secondsLeft={timerRemaining}
             submitting={pendingAction === 'place_bid'}
@@ -1466,17 +1807,7 @@ export default function GameScreen() {
             </View>
           )}
 
-          {trumpReveal && (
-            <View style={styles.trumpRevealBanner} pointerEvents="none">
-              <Text style={styles.trumpRevealText}>
-                Trump:{' '}
-                <Text style={{ color: SUIT_DISPLAY_COLORS[trumpReveal] }}>
-                  {SUIT_SYMBOLS[trumpReveal]}
-                </Text>{' '}
-                {trumpReveal.charAt(0).toUpperCase() + trumpReveal.slice(1)}
-              </Text>
-            </View>
-          )}
+          {trumpReveal && <TrumpCinematic suit={trumpReveal} reduceMotion={reduceMotion} />}
 
           {showBidLock && (
             <Animated.View
@@ -1494,6 +1825,24 @@ export default function GameScreen() {
               ]}
             >
               <View style={styles.bidLockPanel}>
+                <Animated.Text
+                  style={[
+                    styles.bidLockStamp,
+                    {
+                      transform: [
+                        { rotate: '-7deg' },
+                        {
+                          scale: bidLockAnim.interpolate({
+                            inputRange: [0, 0.72, 1],
+                            outputRange: [2.4, 0.88, 1],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  LOCKED
+                </Animated.Text>
                 <Text style={styles.bidLockTitle}>All bids locked!</Text>
                 <Text style={styles.bidLockTotal}>
                   Total bids: {totalBids} / {gameState.cards_this_round} sets
@@ -1533,8 +1882,71 @@ export default function GameScreen() {
           onClose={() => setChatOpen(false)}
           onSend={sendChat}
         />
+        {leaveModal}
       </View>
     </SafeAreaView>
+  );
+}
+
+function LeaveOptionsModal({
+  visible,
+  isHost,
+  activeGame,
+  onLobby,
+  onEndAll,
+  onExit,
+  onCancel,
+}: {
+  visible: boolean;
+  isHost: boolean;
+  activeGame: boolean;
+  onLobby: () => void;
+  onEndAll: () => void;
+  onExit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.leaveModalOverlay}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onCancel} />
+        <View style={styles.leaveModalPanel}>
+          <Text style={styles.leaveModalKicker}>LEAVE TABLE</Text>
+          <Text style={styles.leaveModalTitle}>Where would you like to go?</Text>
+          <Text style={styles.leaveModalBody}>
+            Returning to the lobby keeps you in this room for the next game.
+          </Text>
+
+          {activeGame && (
+            <TouchableOpacity style={styles.leaveChoicePrimary} onPress={onLobby}>
+              <Text style={styles.leaveChoicePrimaryTitle}>Return to Lobby</Text>
+              <Text style={styles.leaveChoicePrimaryBody}>Wait for everyone and choose a new mode</Text>
+            </TouchableOpacity>
+          )}
+
+          {isHost && activeGame && (
+            <TouchableOpacity style={styles.leaveChoiceDanger} onPress={onEndAll}>
+              <Text style={styles.leaveChoiceDangerTitle}>End Game for Everyone</Text>
+              <Text style={styles.leaveChoiceBody}>Move the whole table back to the lobby</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity style={styles.leaveChoice} onPress={onExit}>
+            <Text style={styles.leaveChoiceTitle}>
+              {isHost && activeGame ? 'Leave & Keep Game Running' : 'Exit Game'}
+            </Text>
+            <Text style={styles.leaveChoiceBody}>
+              {isHost && activeGame
+                ? 'Host rights pass to the next joined player'
+                : 'Return to the home screen'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.leaveCancel} onPress={onCancel}>
+            <Text style={styles.leaveCancelText}>Stay at the Table</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1662,6 +2074,44 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  waitingLobbyWrap: {
+    flexGrow: 1,
+    padding: 24,
+    paddingTop: 54,
+    alignItems: 'center',
+  },
+  waitingMessageCard: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 10,
+    padding: 20,
+    marginBottom: 22,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.3)',
+    backgroundColor: 'rgba(212,175,55,0.07)',
+  },
+  waitingMessage: {
+    color: COLORS.goldLight,
+    fontSize: 16,
+    lineHeight: 22,
+    textAlign: 'center',
+    fontWeight: '900',
+  },
+  waitingMessageSub: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  disabledPicker: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    opacity: 0.42,
+    marginBottom: 20,
   },
   backBtn: {
     position: 'absolute',
@@ -1838,6 +2288,76 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
   },
+  removeBotBtn: {
+    width: 28,
+    height: 28,
+    marginLeft: 8,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(239,68,68,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  removeBotText: {
+    color: '#FF8D8D',
+    fontSize: 19,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  ghostDealerSection: {
+    width: '100%',
+    marginBottom: 20,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(155,126,255,0.24)',
+    backgroundColor: 'rgba(92,65,160,0.08)',
+  },
+  ghostDealerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  ghostDealerHint: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+  },
+  botGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  botOption: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 96,
+    borderRadius: 13,
+    paddingHorizontal: 9,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+  },
+  botIcon: {
+    fontSize: 22,
+    marginBottom: 4,
+  },
+  botName: {
+    color: COLORS.goldLight,
+    fontSize: 11,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  botDesc: {
+    color: COLORS.textSecondary,
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 3,
+    textAlign: 'center',
+  },
   goldButton: {
     backgroundColor: COLORS.gold,
     paddingVertical: 15,
@@ -1918,6 +2438,7 @@ const styles = StyleSheet.create({
   },
   statusRail: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 10,
     marginBottom: 8,
@@ -1983,6 +2504,107 @@ const styles = StyleSheet.create({
     color: COLORS.goldLight,
     fontSize: 12,
     fontWeight: '800',
+  },
+  leaveModalOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    backgroundColor: 'rgba(2,8,5,0.82)',
+  },
+  leaveModalPanel: {
+    width: '100%',
+    maxWidth: 390,
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.34)',
+    backgroundColor: '#0B2117',
+    shadowColor: '#000',
+    shadowOpacity: 0.55,
+    shadowRadius: 26,
+    elevation: 20,
+  },
+  leaveModalKicker: {
+    color: COLORS.gold,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 2.4,
+    textAlign: 'center',
+  },
+  leaveModalTitle: {
+    color: COLORS.goldLight,
+    fontFamily: SERIF,
+    fontSize: 24,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  leaveModalBody: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  leaveChoicePrimary: {
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 9,
+    backgroundColor: 'rgba(212,175,55,0.15)',
+    borderWidth: 1,
+    borderColor: COLORS.gold,
+  },
+  leaveChoicePrimaryTitle: {
+    color: COLORS.goldLight,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  leaveChoicePrimaryBody: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  leaveChoiceDanger: {
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 9,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.5)',
+  },
+  leaveChoiceDangerTitle: {
+    color: '#FF8F8F',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  leaveChoice: {
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 9,
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+  },
+  leaveChoiceTitle: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  leaveChoiceBody: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  leaveCancel: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  leaveCancelText: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    fontWeight: '700',
   },
   statusPillLabel: {
     color: COLORS.textSecondary,
@@ -2133,6 +2755,40 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 10,
     fontWeight: '600',
+  },
+  soundPackRow: {
+    flexDirection: 'row',
+    gap: 7,
+  },
+  soundPackChip: {
+    flex: 1,
+    minHeight: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: COLORS.surfaceGlass,
+    gap: 3,
+  },
+  soundPackChipSelected: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(212,175,55,0.12)',
+  },
+  soundPackIcon: {
+    fontSize: 17,
+  },
+  soundPackLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  soundPackLabelSelected: {
+    color: COLORS.goldLight,
+    fontSize: 10,
+    fontWeight: '900',
+    textAlign: 'center',
   },
   roundEndCountdown: {
     color: COLORS.goldLight,
@@ -2601,6 +3257,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10, 28, 19, 0.96)',
     padding: 24,
     alignItems: 'center',
+  },
+  bidLockStamp: {
+    color: COLORS.gold,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: COLORS.gold,
+    borderRadius: 5,
+    overflow: 'hidden',
   },
   bidLockTitle: {
     color: COLORS.goldLight,

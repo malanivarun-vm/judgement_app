@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
+  PanResponder,
   View,
   Text,
   ScrollView,
@@ -66,16 +67,134 @@ function DealtCard({
     ]).start();
   }, [deal, index, reduceMotion]);
 
-  const startRotation = index % 2 === 0 ? '-7deg' : '7deg';
+  const startRotation = index % 2 === 0 ? '-9deg' : '9deg';
+  const startX = ((index % 7) - 3) * 10;
   return (
     <Animated.View
       style={{
         opacity: deal.interpolate({ inputRange: [0, 0.28, 1], outputRange: [0, 1, 1] }),
         transform: [
-          { translateY: deal.interpolate({ inputRange: [0, 1], outputRange: [58, 0] }) },
+          { translateX: deal.interpolate({ inputRange: [0, 1], outputRange: [startX, 0] }) },
+          { translateY: deal.interpolate({ inputRange: [0, 1], outputRange: [-250, 0] }) },
           { scale: deal.interpolate({ inputRange: [0, 0.72, 1], outputRange: [0.74, 1.04, 1] }) },
           { rotate: deal.interpolate({ inputRange: [0, 1], outputRange: [startRotation, '0deg'] }) },
         ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+function GestureCard({
+  canPlay,
+  playPhase,
+  reduceMotion,
+  onCommit,
+  children,
+}: {
+  canPlay: boolean;
+  playPhase: boolean;
+  reduceMotion: boolean;
+  onCommit?: () => void;
+  children: React.ReactNode;
+}) {
+  const drag = useRef(new Animated.ValueXY()).current;
+  const shake = useRef(new Animated.Value(0)).current;
+  const committing = useRef(false);
+  const canPlayRef = useRef(canPlay);
+  const playPhaseRef = useRef(playPhase);
+  const commitRef = useRef(onCommit);
+  canPlayRef.current = canPlay;
+  playPhaseRef.current = playPhase;
+  commitRef.current = onCommit;
+
+  const snapBack = () => {
+    Animated.spring(drag, {
+      toValue: { x: 0, y: 0 },
+      speed: 20,
+      bounciness: 8,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const reject = () => {
+    snapBack();
+    if (reduceMotion) return;
+    shake.setValue(0);
+    Animated.sequence([
+      Animated.timing(shake, { toValue: -8, duration: 45, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: 8, duration: 70, useNativeDriver: true }),
+      Animated.timing(shake, { toValue: -5, duration: 55, useNativeDriver: true }),
+      Animated.spring(shake, { toValue: 0, speed: 25, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        playPhaseRef.current && (Math.abs(gesture.dy) > 6 || Math.abs(gesture.dx) > 9),
+      onPanResponderMove: (_, gesture) => {
+        if (committing.current) return;
+        drag.setValue({
+          x: gesture.dx,
+          y: Math.min(18, gesture.dy),
+        });
+      },
+      onPanResponderRelease: (_, gesture) => {
+        const thrown = gesture.dy < -42 || gesture.vy < -0.42;
+        if (!thrown) {
+          snapBack();
+          return;
+        }
+        if (!canPlayRef.current || !commitRef.current) {
+          reject();
+          return;
+        }
+        committing.current = true;
+        Animated.timing(drag, {
+          toValue: { x: gesture.dx * 0.3, y: -190 },
+          duration: 170,
+          useNativeDriver: true,
+        }).start(() => {
+          commitRef.current?.();
+          drag.setValue({ x: 0, y: 0 });
+          committing.current = false;
+        });
+      },
+      onPanResponderTerminate: snapBack,
+    }),
+  ).current;
+
+  return (
+    <Animated.View
+      {...panResponder.panHandlers}
+      style={{
+        zIndex: 5,
+        transform: [
+          { translateX: Animated.add(drag.x, shake) },
+          { translateY: drag.y },
+          {
+            rotate: drag.x.interpolate({
+              inputRange: [-120, 0, 120],
+              outputRange: ['-13deg', '0deg', '13deg'],
+              extrapolate: 'clamp',
+            }),
+          },
+          {
+            scale: drag.y.interpolate({
+              inputRange: [-180, 0, 20],
+              outputRange: [1.12, 1, 0.97],
+              extrapolate: 'clamp',
+            }),
+          },
+        ],
+        shadowColor: '#000',
+        shadowOpacity: 0.42,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 9,
       }}
     >
       {children}
@@ -120,16 +239,23 @@ export default function HandDisplay({
 
           return (
             <DealtCard key={`${card.rank}-${card.suit}`} index={i} reduceMotion={reduceMotion}>
-              <PlayingCard
-                card={card}
-                size="hand"
-                scale={scale}
-                cardStyle={cardStyle}
-                highlighted={canPlay}
-                dimmed={isDimmed}
-                onPress={canPlay && onPlayCard ? () => onPlayCard(card, i) : undefined}
-                disabled={!canPlay}
-              />
+              <GestureCard
+                canPlay={canPlay}
+                playPhase={isPlayPhase}
+                reduceMotion={reduceMotion}
+                onCommit={canPlay && onPlayCard ? () => onPlayCard(card, i) : undefined}
+              >
+                <PlayingCard
+                  card={card}
+                  size="hand"
+                  scale={scale}
+                  cardStyle={cardStyle}
+                  highlighted={canPlay}
+                  dimmed={isDimmed}
+                  onPress={canPlay && onPlayCard ? () => onPlayCard(card, i) : undefined}
+                  disabled={!canPlay}
+                />
+              </GestureCard>
             </DealtCard>
           );
         })}

@@ -1,5 +1,5 @@
 // Bump this on every deploy that changes cached assets — old caches are purged on activate.
-const CACHE_VERSION = 'judgement-v1';
+const CACHE_VERSION = 'judgement-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

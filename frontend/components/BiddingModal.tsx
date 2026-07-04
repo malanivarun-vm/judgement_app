@@ -23,6 +23,7 @@ interface BiddingModalProps {
   /** Seconds left on the server move timer; turns red ≤3s. */
   secondsLeft?: number | null;
   submitting?: boolean;
+  priorBids?: { id: string; name: string; bid: number }[];
 }
 
 export default function BiddingModal({
@@ -30,6 +31,7 @@ export default function BiddingModal({
   currentRound, totalRounds, restrictedBids, onPlaceBid,
   cardStyle = 'minimal', secondsLeft = null,
   submitting = false,
+  priorBids = [],
 }: BiddingModalProps) {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [selectedBid, setSelectedBid]   = useState(0);
@@ -177,6 +179,27 @@ export default function BiddingModal({
               label={trumpSuit ? `Trump ${trumpSymbol} ${trumpSuit}` : 'Trump chosen after bids'}
               color={trumpSuit ? trumpColor : COLORS.textSecondary}
             />
+          </View>
+
+          <View style={styles.priorBids}>
+            <Text style={styles.priorBidsLabel}>PREDICTIONS BEFORE YOU</Text>
+            {priorBids.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.priorBidRow}
+              >
+                {priorBids.map((player, index) => (
+                  <View key={player.id} style={styles.priorBidChip}>
+                    <Text style={styles.priorBidOrder}>{index + 1}</Text>
+                    <Text style={styles.priorBidName} numberOfLines={1}>{player.name}</Text>
+                    <Text style={styles.priorBidValue}>{player.bid}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.priorBidsEmpty}>You are predicting first.</Text>
+            )}
           </View>
 
           {/* ── Giant number picker ──────────────────────── */}
@@ -331,6 +354,55 @@ const styles = StyleSheet.create({
   chipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700' },
 
   // Number picker
+  priorBids: {
+    marginBottom: 14,
+  },
+  priorBidsLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1.3,
+    marginBottom: 7,
+  },
+  priorBidRow: {
+    gap: 7,
+    paddingRight: 4,
+  },
+  priorBidChip: {
+    minWidth: 92,
+    maxWidth: 125,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.055)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  priorBidOrder: {
+    color: COLORS.textSecondary,
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  priorBidName: {
+    color: COLORS.text,
+    fontSize: 11,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  priorBidValue: {
+    color: COLORS.gold,
+    fontSize: 16,
+    fontWeight: '900',
+    marginLeft: 'auto',
+  },
+  priorBidsEmpty: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
   pickerRow: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'center', gap: 20, marginBottom: 18,

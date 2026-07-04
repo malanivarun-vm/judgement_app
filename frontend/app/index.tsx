@@ -36,11 +36,12 @@ export default function HomeScreen() {
   const { code: codeParam } = useLocalSearchParams<{ code?: string }>();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<'create' | 'join' | null>(null);
   const [error, setError] = useState('');
   const [reduceMotion, setReduceMotion] = useState(false);
   const floatAnim = useRef(new Animated.Value(0)).current;
   const entryAnim = useRef(new Animated.Value(0)).current;
+  const nameRequiredAnim = useRef(new Animated.Value(0)).current;
   const { width } = useWindowDimensions();
   const isNarrow = width < 400;
 
@@ -108,13 +109,26 @@ export default function HomeScreen() {
     }
   };
 
+  const showNameRequired = () => {
+    setError('Your name is required.');
+    void fireHaptic('medium');
+    if (reduceMotion) return;
+    nameRequiredAnim.setValue(0);
+    Animated.timing(nameRequiredAnim, {
+      toValue: 1,
+      duration: 420,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  };
+
   const createRoom = async () => {
     if (!playerName.trim()) {
-      setError('Enter your player name first.');
+      showNameRequired();
       return;
     }
     setError('');
-    setLoading(true);
+    setLoadingAction('create');
     try {
       void fireHaptic('medium');
       const backendUrl = requireBackendUrl();
@@ -138,13 +152,13 @@ export default function HomeScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create room. Please try again.');
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   };
 
   const joinRoom = async () => {
     if (!playerName.trim()) {
-      setError('Enter your player name first.');
+      showNameRequired();
       return;
     }
     const code = parseRoomCodeParam(roomCode);
@@ -153,7 +167,7 @@ export default function HomeScreen() {
       return;
     }
     setError('');
-    setLoading(true);
+    setLoadingAction('join');
     try {
       void fireHaptic('selection');
       const backendUrl = requireBackendUrl();
@@ -165,7 +179,7 @@ export default function HomeScreen() {
         return;
       }
       if (!data.joinable) {
-        setError('That room is full or the game has already started.');
+        setError('That room is currently full.');
         return;
       }
       const playerId = generateId();
@@ -181,7 +195,7 @@ export default function HomeScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not check room. Please try again.');
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   };
 
@@ -352,19 +366,42 @@ export default function HomeScreen() {
           ]}
         >
           <View style={styles.formPanelAccent} />
-          <View style={styles.nameBlock}>
+          <Animated.View
+            style={[
+              styles.nameBlock,
+              {
+                transform: [
+                  {
+                    translateX: nameRequiredAnim.interpolate({
+                      inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+                      outputRange: [0, -10, 10, -7, 7, 0],
+                    }),
+                  },
+                  {
+                    scale: nameRequiredAnim.interpolate({
+                      inputRange: [0, 0.5, 1],
+                      outputRange: [1, 1.025, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
             <Text style={styles.label}>Your Name</Text>
             <TextInput
               testID="player-name-input"
               style={styles.input}
               value={playerName}
-              onChangeText={setPlayerName}
+              onChangeText={(value) => {
+                setPlayerName(value);
+                if (value.trim()) setError('');
+              }}
               placeholder="Enter your name"
               placeholderTextColor="rgba(255,255,255,0.3)"
               maxLength={16}
               autoCapitalize="words"
             />
-          </View>
+          </Animated.View>
 
           <View style={[styles.actionRow, isNarrow && styles.actionRowNarrow]}>
             <View style={styles.actionCreate}>
@@ -373,10 +410,10 @@ export default function HomeScreen() {
                 testID="create-room-btn"
                 style={styles.goldButton}
                 onPress={createRoom}
-                disabled={loading}
+                disabled={loadingAction !== null}
                 activeOpacity={0.8}
               >
-                {loading ? (
+                {loadingAction === 'create' ? (
                   <ActivityIndicator color="#000" />
                 ) : (
                   <Text style={styles.goldButtonText}>Create Room</Text>
@@ -402,10 +439,14 @@ export default function HomeScreen() {
                 testID="join-room-btn"
                 style={styles.outlineButton}
                 onPress={joinRoom}
-                disabled={loading}
+                disabled={loadingAction !== null}
                 activeOpacity={0.8}
               >
-                <Text style={styles.outlineButtonText}>Join Room</Text>
+                {loadingAction === 'join' ? (
+                  <ActivityIndicator color="#f6d88a" />
+                ) : (
+                  <Text style={styles.outlineButtonText}>Join Room</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
