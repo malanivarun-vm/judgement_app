@@ -2,19 +2,12 @@
 import pytest
 import requests
 import os
-from pathlib import Path
 
-# Read from frontend .env file
-env_file = Path('/app/frontend/.env')
-BASE_URL = ''
-if env_file.exists():
-    for line in env_file.read_text().splitlines():
-        if line.startswith('EXPO_PUBLIC_BACKEND_URL='):
-            BASE_URL = line.split('=', 1)[1].strip().rstrip('/')
-            break
-
-if not BASE_URL:
-    BASE_URL = 'https://card-duel-arena-10.preview.emergentagent.com'
+BASE_URL = os.getenv('TEST_BASE_URL', '').rstrip('/')
+pytestmark = pytest.mark.skipif(
+    not BASE_URL,
+    reason='Set TEST_BASE_URL to run live HTTP integration tests',
+)
 
 
 class TestRoomAPI:
@@ -37,6 +30,8 @@ class TestRoomAPI:
         assert "room_id" in data
         assert len(data["room_id"]) == 4
         assert data["room_id"].isupper()
+        assert isinstance(data["host_token"], str)
+        assert len(data["host_token"]) >= 32
         print(f"✓ Room created: {data['room_id']}")
 
     def test_create_multiple_rooms_unique_ids(self):

@@ -10,7 +10,12 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Start the app
+2. Configure the backend
+
+   Copy `.env.example` to `.env`. When testing on a physical phone, replace
+   `localhost` with the computer's LAN IP so the phone can reach the server.
+
+3. Start the app
 
    ```bash
    npx expo start

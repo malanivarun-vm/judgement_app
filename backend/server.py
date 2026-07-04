@@ -3,7 +3,9 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import logging
 import json
+import hmac
 import math
+import secrets
 import uuid
 import random
 import string
@@ -71,8 +73,10 @@ rooms: Dict[str, 'GameRoom'] = {}
 
 
 class GameRoom:
-    def __init__(self, room_id: str):
+    def __init__(self, room_id: str, host_token: Optional[str] = None):
         self.room_id = room_id
+        self.host_token = host_token or secrets.token_urlsafe(32)
+        self.host_claimed = False
         self.players: List[Dict] = []
         self.connections: Dict[str, WebSocket] = {}
         self.phase = 'waiting'
@@ -165,19 +169,20 @@ class GameRoom:
         player_id: str,
         text,
         now: Optional[float] = None,
-    ) -> Optional[Dict]:
+    ) -> tuple[Optional[Dict], Optional[str]]:
         now = now if now is not None else time.time()
         my_index = next((i for i, p in enumerate(self.players) if p['id'] == player_id), -1)
         if my_index == -1:
-            return None
+            return None, "Player not found"
         if not isinstance(text, str):
-            return None
+            return None, "Message must be text"
         text = text.strip()[:CHAT_MAX_LEN]
         if not text:
-            return None
+            return None, "Message cannot be empty"
         last = self.last_chat_at.get(player_id)
         if last is not None and now - last < CHAT_COOLDOWN_SECONDS:
-            return None
+            retry_after = CHAT_COOLDOWN_SECONDS - (now - last)
+            return None, f"Please wait {retry_after:.1f}s before sending again"
         self.last_chat_at[player_id] = now
         return {
             'type': 'chat',
@@ -185,7 +190,7 @@ class GameRoom:
             'player_name': self.players[my_index]['name'],
             'text': text,
             'ts': now,
-        }
+        }, None
 
     def touch(self):
         self.last_activity = time.time()
@@ -657,9 +662,10 @@ async def create_room():
     cleanup_rooms()
 
     room_id = generate_room_id()
-    rooms[room_id] = GameRoom(room_id)
+    room = GameRoom(room_id)
+    rooms[room_id] = room
     logger.info(f"Room created: {room_id}")
-    return {"room_id": room_id}
+    return {"room_id": room_id, "host_token": room.host_token}
 
 
 @api_router.get("/rooms/{room_id}/exists")
@@ -680,7 +686,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
     player_name = websocket.query_params.get('player_name', 'Player')
     player_id = websocket.query_params.get('player_id', str(uuid.uuid4()))
-    is_host_param = websocket.query_params.get('is_host', 'false') == 'true'
+    supplied_host_token = websocket.query_params.get('host_token', '')
 
     room = rooms.get(room_id)
     if not room:
@@ -705,10 +711,17 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             await websocket.send_json({"type": "error", "message": "Room is full (max 7)"})
             await websocket.close()
             return
+        claims_host = (
+            not room.host_claimed
+            and bool(supplied_host_token)
+            and hmac.compare_digest(supplied_host_token, room.host_token)
+        )
+        if claims_host:
+            room.host_claimed = True
         room.players.append({
             'id': player_id,
             'name': player_name,
-            'is_host': is_host_param or len(room.players) == 0,
+            'is_host': claims_host,
             'hand': [],
             'bid': None,
             'has_bid': False,
@@ -804,9 +817,24 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                 continue
 
             elif action == 'chat':
-                payload = room.handle_chat(player_id, data.get('text'))
+                message_id = data.get('message_id')
+                payload, chat_error = room.handle_chat(player_id, data.get('text'))
+                if chat_error:
+                    await websocket.send_json({
+                        "type": "chat_ack",
+                        "message_id": message_id,
+                        "accepted": False,
+                        "message": chat_error,
+                    })
+                    continue
                 if payload:
+                    payload['message_id'] = message_id
                     await room.broadcast_payload(payload)
+                    await websocket.send_json({
+                        "type": "chat_ack",
+                        "message_id": message_id,
+                        "accepted": True,
+                    })
                 continue
 
             await room.broadcast_state()

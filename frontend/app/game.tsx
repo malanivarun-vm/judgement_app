@@ -36,6 +36,11 @@ import ChatDrawer, { FeedItem } from '../components/ChatDrawer';
 import TurnClock, { DANGER_AT_SECONDS } from '../components/TurnClock';
 import GoldRain from '../components/GoldRain';
 import SirenVignette from '../components/SirenVignette';
+import {
+  BACKEND_CONFIG_ERROR,
+  BACKEND_URL,
+  buildWebSocketUrl,
+} from '../utils/backend';
 
 /** Alert.alert is a silent no-op on react-native-web — use window.confirm there. */
 function confirmDialog(title: string, message: string, onConfirm: () => void) {
@@ -55,8 +60,6 @@ import { seatPositions, seatSize } from '../utils/tableLayout';
 import { useCardSound } from '../utils/useCardSound';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? '';
 
 interface GameState {
   type: string;
@@ -111,7 +114,7 @@ export default function GameScreen() {
     room_id: string;
     player_name: string;
     player_id: string;
-    is_host: string;
+    host_token?: string;
   }>();
   const router = useRouter();
   const ws = useRef<WebSocket | null>(null);
@@ -148,7 +151,6 @@ export default function GameScreen() {
   const chatOpenRef = useRef(false);
   const feedSeq = useRef(0);
   const gameStateRef = useRef<GameState | null>(null);
-  const lastSentChatRef = useRef<{ text: string; at: number } | null>(null);
 
   // === Authoritative turn countdown ===
   const deadlineRef = useRef<number | null>(null);
@@ -278,6 +280,10 @@ export default function GameScreen() {
 
   const connect = useCallback(() => {
     if (intentionalClose.current) return;
+    if (!BACKEND_URL) {
+      setError(BACKEND_CONFIG_ERROR);
+      return;
+    }
     if (
       ws.current &&
       (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)
@@ -289,9 +295,13 @@ export default function GameScreen() {
       reconnectTimer.current = null;
     }
 
-    const wsProtocol = BACKEND_URL.startsWith('https') ? 'wss' : 'ws';
-    const wsHost = BACKEND_URL.replace(/^https?:\/\//, '');
-    const url = `${wsProtocol}://${wsHost}/api/ws/${params.room_id}?player_name=${encodeURIComponent(params.player_name || '')}&player_id=${params.player_id}&is_host=${params.is_host}`;
+    const url = buildWebSocketUrl(
+      BACKEND_URL,
+      params.room_id,
+      params.player_name || '',
+      params.player_id,
+      params.host_token,
+    );
 
     const socket = new WebSocket(url);
     ws.current = socket;
@@ -424,22 +434,19 @@ export default function GameScreen() {
           });
         } else if (data.type === 'chat') {
           const mine = data.player_index === gameStateRef.current?.your_index;
-          // Skip the server echo of a message we already rendered locally
-          const sent = lastSentChatRef.current;
-          if (mine && sent && sent.text === data.text && Date.now() - sent.at < 6000) {
-            lastSentChatRef.current = null;
-          } else {
-            pushFeed({
-              kind: 'chat',
-              name: data.player_name,
-              text: data.text,
-              mine,
-            });
-            if (!mine && !chatOpenRef.current) {
-              setUnread((u) => Math.min(99, u + 1));
-              void fireHaptic('light');
-            }
+          pushFeed({
+            kind: 'chat',
+            name: data.player_name,
+            text: data.text,
+            mine,
+          });
+          if (!mine && !chatOpenRef.current) {
+            setUnread((u) => Math.min(99, u + 1));
+            void fireHaptic('light');
           }
+        } else if (data.type === 'chat_ack' && !data.accepted) {
+          setError(data.message || 'Message was not sent');
+          setTimeout(() => setError(''), 4000);
         } else if (data.type === 'timeout') {
           pushFeed({
             kind: 'timeout',
@@ -450,7 +457,7 @@ export default function GameScreen() {
         // ignore parse errors
       }
     };
-  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop, playCardSound, pushFeed]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.host_token, trickPop, playCardSound, pushFeed]);
 
   useEffect(() => {
     intentionalClose.current = false;
@@ -605,10 +612,15 @@ export default function GameScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={COLORS.gold} />
+          {!error && <ActivityIndicator size="large" color={COLORS.gold} />}
           <Text style={styles.loadingText}>
-            {connected ? 'Loading game...' : 'Connecting...'}
+            {error || (connected ? 'Loading game...' : 'Connecting...')}
           </Text>
+          {error && (
+            <TouchableOpacity style={styles.outlineButton} onPress={() => router.replace('/')}>
+              <Text style={styles.outlineButtonText}>Back to Home</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );
@@ -637,10 +649,12 @@ export default function GameScreen() {
     : null;
   const timerTotal = timerTotalRef.current;
   const sendChat = (text: string) => {
-    // Echo instantly so chat feels alive; the server broadcast is deduped
-    lastSentChatRef.current = { text, at: Date.now() };
-    pushFeed({ kind: 'chat', name: myInfo?.name || params.player_name, text, mine: true });
-    void sendAction({ action: 'chat', text }, 'light');
+    if (ws.current?.readyState !== WebSocket.OPEN) {
+      setError('Message not sent while reconnecting');
+      return;
+    }
+    const messageId = `${params.player_id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    void sendAction({ action: 'chat', text, message_id: messageId }, 'light');
   };
 
   // Playable cards logic

@@ -6,9 +6,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
+  ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ActivityIndicator,
   StatusBar,
   Animated,
@@ -21,10 +21,10 @@ import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SERIF } from '../utils/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parseRoomCodeParam } from '../utils/share';
+import { requireBackendUrl } from '../utils/backend';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? '';
 const PLAYER_NAME_KEY = 'judgement_player_name';
 
 function generateId(): string {
@@ -37,6 +37,7 @@ export default function HomeScreen() {
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [reduceMotion, setReduceMotion] = useState(false);
   const floatAnim = useRef(new Animated.Value(0)).current;
   const entryAnim = useRef(new Animated.Value(0)).current;
@@ -109,14 +110,20 @@ export default function HomeScreen() {
 
   const createRoom = async () => {
     if (!playerName.trim()) {
-      Alert.alert('Enter Name', 'Please enter your player name');
+      setError('Enter your player name first.');
       return;
     }
+    setError('');
     setLoading(true);
     try {
       void fireHaptic('medium');
-      const res = await fetch(`${BACKEND_URL}/api/rooms`, { method: 'POST' });
+      const backendUrl = requireBackendUrl();
+      const res = await fetch(`${backendUrl}/api/rooms`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Room creation failed (${res.status})`);
       const data = await res.json();
+      if (!data.room_id || !data.host_token) {
+        throw new Error('Room creation returned an invalid response');
+      }
       const playerId = generateId();
       void AsyncStorage.setItem(PLAYER_NAME_KEY, playerName.trim()).catch(() => {});
       router.push({
@@ -125,11 +132,11 @@ export default function HomeScreen() {
           room_id: data.room_id,
           player_name: playerName.trim(),
           player_id: playerId,
-          is_host: 'true',
+          host_token: data.host_token,
         },
       });
-    } catch {
-      Alert.alert('Error', 'Could not create room. Please try again.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create room. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -137,25 +144,28 @@ export default function HomeScreen() {
 
   const joinRoom = async () => {
     if (!playerName.trim()) {
-      Alert.alert('Enter Name', 'Please enter your player name');
+      setError('Enter your player name first.');
       return;
     }
-    if (!roomCode.trim()) {
-      Alert.alert('Enter Code', 'Please enter the room code');
+    const code = parseRoomCodeParam(roomCode);
+    if (!code) {
+      setError('Enter a valid 4-letter room code.');
       return;
     }
+    setError('');
     setLoading(true);
     try {
       void fireHaptic('selection');
-      const code = roomCode.trim().toUpperCase();
-      const res = await fetch(`${BACKEND_URL}/api/rooms/${code}/exists`);
+      const backendUrl = requireBackendUrl();
+      const res = await fetch(`${backendUrl}/api/rooms/${code}/exists`);
+      if (!res.ok) throw new Error(`Room lookup failed (${res.status})`);
       const data = await res.json();
       if (!data.exists) {
-        Alert.alert('Not Found', 'Room does not exist');
+        setError('Room not found. Check the code and try again.');
         return;
       }
       if (!data.joinable) {
-        Alert.alert('Cannot Join', 'Room is full or game already started');
+        setError('That room is full or the game has already started.');
         return;
       }
       const playerId = generateId();
@@ -166,11 +176,10 @@ export default function HomeScreen() {
           room_id: code,
           player_name: playerName.trim(),
           player_id: playerId,
-          is_host: 'false',
         },
       });
-    } catch {
-      Alert.alert('Error', 'Could not check room. Please try again.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not check room. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -179,9 +188,14 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
-        style={styles.container}
+        style={styles.keyboard}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         {/* Hero wrapper - suits scatter behind title */}
         <View style={styles.heroWrapper}>
           {!reduceMotion ? (
@@ -397,6 +411,12 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
+        {error ? (
+          <View style={styles.errorBanner} accessibilityRole="alert">
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
         <TouchableOpacity
           style={styles.howToPlayLink}
           onPress={async () => {
@@ -410,6 +430,7 @@ export default function HomeScreen() {
             <Text style={styles.howToPlayAction}>How to Play →</Text>
           </Text>
         </TouchableOpacity>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -421,9 +442,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingTop: STATUSBAR_HEIGHT,
   },
-  container: {
+  keyboard: {
     flex: 1,
+  },
+  container: {
+    flexGrow: 1,
     paddingHorizontal: 28,
+    paddingVertical: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -619,6 +644,22 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingVertical: 14,
     alignItems: 'center',
+  },
+  errorBanner: {
+    width: '100%',
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.45)',
+    borderRadius: 12,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  errorText: {
+    color: '#FFB4B4',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   howToPlayText: {
     color: COLORS.textSecondary,

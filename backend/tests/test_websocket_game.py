@@ -4,19 +4,13 @@ import asyncio
 import websockets
 import json
 import requests
-from pathlib import Path
+import os
 
-# Read BASE_URL from frontend .env
-env_file = Path('/app/frontend/.env')
-BASE_URL = ''
-if env_file.exists():
-    for line in env_file.read_text().splitlines():
-        if line.startswith('EXPO_PUBLIC_BACKEND_URL='):
-            BASE_URL = line.split('=', 1)[1].strip().rstrip('/')
-            break
-
-if not BASE_URL:
-    BASE_URL = 'https://card-duel-arena-10.preview.emergentagent.com'
+BASE_URL = os.getenv('TEST_BASE_URL', '').rstrip('/')
+pytestmark = pytest.mark.skipif(
+    not BASE_URL,
+    reason='Set TEST_BASE_URL to run live WebSocket integration tests',
+)
 
 WS_URL = BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
 
@@ -29,11 +23,13 @@ class TestWebSocketGame:
         async def test():
             # Create a room first
             response = requests.post(f"{BASE_URL}/api/rooms")
-            room_id = response.json()["room_id"]
+            created = response.json()
+            room_id = created["room_id"]
+            host_token = created["host_token"]
             print(f"✓ Created room: {room_id}")
 
             # Connect as player 1 (host)
-            ws_url = f"{WS_URL}/api/ws/{room_id}?player_name=Player1&player_id=p1&is_host=true"
+            ws_url = f"{WS_URL}/api/ws/{room_id}?player_name=Player1&player_id=p1&host_token={host_token}"
             async with websockets.connect(ws_url) as ws1:
                 # Receive initial state
                 msg = await ws1.recv()
@@ -47,7 +43,7 @@ class TestWebSocketGame:
                 print("✓ Player 1 connected and received waiting state")
 
                 # Connect as player 2
-                ws_url2 = f"{WS_URL}/api/ws/{room_id}?player_name=Player2&player_id=p2&is_host=false"
+                ws_url2 = f"{WS_URL}/api/ws/{room_id}?player_name=Player2&player_id=p2"
                 async with websockets.connect(ws_url2) as ws2:
                     # Both players should receive updated state
                     msg1 = await ws1.recv()
@@ -61,7 +57,7 @@ class TestWebSocketGame:
                     print("✓ Player 2 connected, both received updated state")
 
                     # Connect player 3
-                    ws_url3 = f"{WS_URL}/api/ws/{room_id}?player_name=Player3&player_id=p3&is_host=false"
+                    ws_url3 = f"{WS_URL}/api/ws/{room_id}?player_name=Player3&player_id=p3"
                     async with websockets.connect(ws_url3) as ws3:
                         # All players receive state
                         await ws1.recv()
@@ -94,11 +90,13 @@ class TestWebSocketGame:
         async def test():
             # Create room and connect 3 players
             response = requests.post(f"{BASE_URL}/api/rooms")
-            room_id = response.json()["room_id"]
+            created = response.json()
+            room_id = created["room_id"]
+            host_token = created["host_token"]
 
-            ws_url1 = f"{WS_URL}/api/ws/{room_id}?player_name=P1&player_id=p1&is_host=true"
-            ws_url2 = f"{WS_URL}/api/ws/{room_id}?player_name=P2&player_id=p2&is_host=false"
-            ws_url3 = f"{WS_URL}/api/ws/{room_id}?player_name=P3&player_id=p3&is_host=false"
+            ws_url1 = f"{WS_URL}/api/ws/{room_id}?player_name=P1&player_id=p1&host_token={host_token}"
+            ws_url2 = f"{WS_URL}/api/ws/{room_id}?player_name=P2&player_id=p2"
+            ws_url3 = f"{WS_URL}/api/ws/{room_id}?player_name=P3&player_id=p3"
 
             async with websockets.connect(ws_url1) as ws1, \
                        websockets.connect(ws_url2) as ws2, \
@@ -204,9 +202,11 @@ class TestWebSocketGame:
         """Test that invalid bids return error messages"""
         async def test():
             response = requests.post(f"{BASE_URL}/api/rooms")
-            room_id = response.json()["room_id"]
+            created = response.json()
+            room_id = created["room_id"]
+            host_token = created["host_token"]
 
-            ws_url = f"{WS_URL}/api/ws/{room_id}?player_name=P1&player_id=p1&is_host=true"
+            ws_url = f"{WS_URL}/api/ws/{room_id}?player_name=P1&player_id=p1&host_token={host_token}"
             async with websockets.connect(ws_url) as ws:
                 await ws.recv()  # Initial state
                 
@@ -225,12 +225,15 @@ class TestWebSocketGame:
         """Test that 8th player cannot join (max 7)"""
         async def test():
             response = requests.post(f"{BASE_URL}/api/rooms")
-            room_id = response.json()["room_id"]
+            created = response.json()
+            room_id = created["room_id"]
+            host_token = created["host_token"]
 
             # Connect 7 players
             connections = []
             for i in range(7):
-                ws_url = f"{WS_URL}/api/ws/{room_id}?player_name=P{i+1}&player_id=p{i+1}&is_host={i==0}"
+                host_query = f"&host_token={host_token}" if i == 0 else ""
+                ws_url = f"{WS_URL}/api/ws/{room_id}?player_name=P{i+1}&player_id=p{i+1}{host_query}"
                 ws = await websockets.connect(ws_url)
                 connections.append(ws)
                 await ws.recv()  # Receive state
@@ -244,7 +247,7 @@ class TestWebSocketGame:
             print(f"✓ Connected 7 players successfully")
 
             # Try to connect 8th player
-            ws_url8 = f"{WS_URL}/api/ws/{room_id}?player_name=P8&player_id=p8&is_host=false"
+            ws_url8 = f"{WS_URL}/api/ws/{room_id}?player_name=P8&player_id=p8"
             ws8 = await websockets.connect(ws_url8)
             msg = await ws8.recv()
             response = json.loads(msg)

@@ -23,8 +23,13 @@ def disconnect(room, idx, seconds_ago=FORCE_GRACE_SECONDS + 1):
 
 def test_force_action_rejects_non_host():
     room = make_room()
-    disconnect(room, room.current_player_index)
-    assert room.force_action('p1') == "Only the host can act for an offline player"
+    target_idx = room.current_player_index
+    if target_idx == 0:
+        room.players[0]['is_host'] = False
+        room.players[2]['is_host'] = True
+    requester_id = 'p1' if target_idx != 1 else 'p2'
+    disconnect(room, target_idx)
+    assert room.force_action(requester_id) == "Only the host can act for an offline player"
 
 
 def test_force_action_rejects_connected_target():
