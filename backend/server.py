@@ -21,6 +21,7 @@ from game_engine import (
 
 VARIATIONS = ('v1', 'v1.1', 'v2', 'v3')
 VALID_SUITS = ('hearts', 'spades', 'diamonds', 'clubs')
+VALID_RANKS = ('2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A')
 FORCE_GRACE_SECONDS = 15
 REACTION_COOLDOWN_SECONDS = 1.0
 # How long a lobby player may stay disconnected (e.g. switched apps to share
@@ -77,6 +78,8 @@ class GameRoom:
         self.room_id = room_id
         self.host_token = host_token or secrets.token_urlsafe(32)
         self.host_claimed = False
+        self.creator_player_id: Optional[str] = None
+        self.creator_relinquished = False
         self.players: List[Dict] = []
         self.connections: Dict[str, WebSocket] = {}
         self.phase = 'waiting'
@@ -104,6 +107,39 @@ class GameRoom:
         self.pace = 'standard'
         self.turn_seconds = PACES['standard']
         self.last_activity = time.time()
+
+    def _ensure_host(self):
+        """Keep one connected player in control whenever possible."""
+        current_host = next((p for p in self.players if p.get('is_host')), None)
+        if current_host and current_host.get('is_connected', True):
+            return
+        if current_host:
+            current_host['is_host'] = False
+        replacement = next(
+            (p for p in self.players if p.get('is_connected', True)),
+            self.players[0] if self.players else None,
+        )
+        if replacement:
+            replacement['is_host'] = True
+
+    def leave_player(self, player_id: str) -> Optional[str]:
+        player = next((p for p in self.players if p['id'] == player_id), None)
+        if not player:
+            return "Player not found"
+        if player_id == self.creator_player_id:
+            self.creator_relinquished = True
+
+        if self.phase in ('waiting', 'game_over'):
+            self.players = [p for p in self.players if p['id'] != player_id]
+        else:
+            # Active-game seats cannot be removed without corrupting turn and
+            # trick indices. Mark the seat offline so the timer can auto-play.
+            player['is_connected'] = False
+            player['offline_since'] = time.time()
+            player['is_host'] = False
+        self._ensure_host()
+        self.touch()
+        return None
 
     def set_pace(self, player_id: str, pace: str) -> Optional[str]:
         player = next((p for p in self.players if p['id'] == player_id), None)
@@ -142,7 +178,13 @@ class GameRoom:
             idx = self.current_player_index
             if idx == self.bidding_order[-1]:
                 bids_so_far = [self.players[i]['bid'] for i in self.bidding_order[:-1]]
-                restricted = get_restricted_bids(bids_so_far, self.cards_this_round)
+                if sum(bids_so_far) == self.cards_this_round:
+                    restricted = [
+                        bid for bid in range(self.cards_this_round + 1)
+                        if bid != 1
+                    ]
+                else:
+                    restricted = get_restricted_bids(bids_so_far, self.cards_this_round)
             target = self.players[idx]
             bid = next(b for b in range(self.cards_this_round + 1) if b not in restricted)
             return self.place_bid(target['id'], bid)
@@ -156,7 +198,10 @@ class GameRoom:
 
         if self.phase == 'trump_selection':
             target = self.players[self.trump_caller_index]
-            return self.call_trump(target['id'], None)  # blind draw
+            per = self.cards_this_round - len(self.players[0].get('hand', []))
+            cards_needed = len(self.players) * per
+            suit = None if len(self.remaining_deck) > cards_needed else random.choice(VALID_SUITS)
+            return self.call_trump(target['id'], suit)
 
         if self.phase == 'trump_selection_v3':
             target = self.players[self.trump_caller_index]
@@ -209,13 +254,8 @@ class GameRoom:
             or (now - p['offline_since']) < LOBBY_GRACE_SECONDS
         ]
         changed = len(self.players) != before
-        if changed and self.players and not any(p['is_host'] for p in self.players):
-            # Prefer a connected player as the new host
-            new_host = next(
-                (p for p in self.players if p.get('is_connected', True)),
-                self.players[0],
-            )
-            new_host['is_host'] = True
+        if changed:
+            self._ensure_host()
         return changed
 
     def is_expired(self) -> bool:
@@ -264,7 +304,19 @@ class GameRoom:
                 self.players[i]['bid'] for i in self.bidding_order[:-1]
                 if self.players[i].get('has_bid')
             ]
-            restricted_bids = get_restricted_bids(bids_so_far, self.cards_this_round)
+            if sum(bids_so_far) == self.cards_this_round:
+                restricted_bids = [
+                    bid for bid in range(self.cards_this_round + 1)
+                    if bid != 1
+                ]
+            else:
+                restricted_bids = get_restricted_bids(bids_so_far, self.cards_this_round)
+
+        blind_draw_available = False
+        if self.phase == 'trump_selection' and self.players:
+            second_batch_size = self.cards_this_round - len(self.players[0].get('hand', []))
+            cards_needed = len(self.players) * second_batch_size
+            blind_draw_available = len(self.remaining_deck) > cards_needed
 
         return {
             'type': 'state',
@@ -300,6 +352,9 @@ class GameRoom:
             'turn_timer_seconds': self.turn_seconds,
             'round_end_auto_seconds': ROUND_END_AUTO_SECONDS,
             'pace': self.pace,
+            'blind_draw_available': blind_draw_available,
+            # This secret is only included in the state sent to its owner.
+            'resume_token': player.get('resume_token') if player else None,
         }
 
     async def broadcast_state(self):
@@ -445,9 +500,15 @@ class GameRoom:
 
         if self.phase == 'trump_selection':
             if suit is None:
-                # Blind draw: random suit from the un-dealt cards
-                source = self.remaining_deck or [{'suit': s} for s in VALID_SUITS]
-                self.trump_suit = random.choice(source)['suit']
+                # The blind card is set aside and must never be dealt.
+                n = len(self.players)
+                per = self.cards_this_round - len(self.players[0]['hand'])
+                cards_needed = n * per
+                if len(self.remaining_deck) <= cards_needed:
+                    return "Blind draw is unavailable when the full deck is needed"
+                blind_index = random.randrange(len(self.remaining_deck))
+                blind_card = self.remaining_deck.pop(blind_index)
+                self.trump_suit = blind_card['suit']
             elif suit in VALID_SUITS:
                 self.trump_suit = suit
             else:
@@ -488,6 +549,8 @@ class GameRoom:
         # Dealer restriction (last bidder)
         if idx == self.bidding_order[-1]:
             bids_so_far = [self.players[i]['bid'] for i in self.bidding_order[:-1]]
+            if sum(bids_so_far) == self.cards_this_round and bid != 1:
+                return "Dealer must bid 1 when the other bids equal the cards dealt"
             restricted = get_restricted_bids(bids_so_far, self.cards_this_round)
             if bid in restricted:
                 return f"Cannot bid {bid} (total would equal cards dealt)"
@@ -525,6 +588,12 @@ class GameRoom:
             return "Not in playing phase"
         if idx != self.current_player_index:
             return "Not your turn"
+        if (
+            not isinstance(card, dict)
+            or card.get('suit') not in VALID_SUITS
+            or card.get('rank') not in VALID_RANKS
+        ):
+            return "Invalid card"
 
         player = self.players[idx]
         hand = player['hand']
@@ -685,8 +754,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
     room_id = room_id.upper()
 
     player_name = websocket.query_params.get('player_name', 'Player')
+    player_name = player_name.strip()[:16] or 'Player'
     player_id = websocket.query_params.get('player_id', str(uuid.uuid4()))
     supplied_host_token = websocket.query_params.get('host_token', '')
+    supplied_resume_token = websocket.query_params.get('resume_token', '')
 
     room = rooms.get(room_id)
     if not room:
@@ -699,9 +770,27 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
     # Check reconnection
     existing = next((p for p in room.players if p['id'] == player_id), None)
     if existing:
+        expected_resume_token = existing.get('resume_token', '')
+        if (
+            not supplied_resume_token
+            or not expected_resume_token
+            or not hmac.compare_digest(supplied_resume_token, expected_resume_token)
+        ):
+            await websocket.send_json({
+                "type": "error",
+                "message": "This seat belongs to another session",
+            })
+            await websocket.close(code=4003)
+            return
         existing['is_connected'] = True
         existing['offline_since'] = None
         existing['name'] = player_name
+        if (
+            player_id == room.creator_player_id
+            and not room.creator_relinquished
+        ):
+            for player in room.players:
+                player['is_host'] = player['id'] == player_id
     else:
         if room.phase != 'waiting':
             await websocket.send_json({"type": "error", "message": "Game already in progress"})
@@ -718,6 +807,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         )
         if claims_host:
             room.host_claimed = True
+            room.creator_player_id = player_id
         room.players.append({
             'id': player_id,
             'name': player_name,
@@ -729,16 +819,35 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
             'total_score': 0,
             'is_connected': True,
             'offline_since': None,
+            'resume_token': secrets.token_urlsafe(32),
         })
 
+    previous_socket = room.connections.get(player_id)
     room.connections[player_id] = websocket
+    if previous_socket and previous_socket is not websocket:
+        try:
+            await previous_socket.close(code=4001, reason="Session resumed elsewhere")
+        except Exception:
+            pass
     logger.info(f"Player {player_name} ({player_id}) joined room {room_id}")
     await room.broadcast_state()
 
     try:
         while True:
             raw = await websocket.receive_text()
-            data = json.loads(raw)
+            # A superseded connection must not be able to keep acting after a
+            # valid resume has installed a newer socket for the same player.
+            if room.connections.get(player_id) is not websocket:
+                await websocket.close(code=4001)
+                return
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON message"})
+                continue
+            if not isinstance(data, dict):
+                await websocket.send_json({"type": "error", "message": "Message must be an object"})
+                continue
             action = data.get('action')
             room.touch()
 
@@ -755,6 +864,12 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     continue
                 if len(room.players) < 3:
                     await websocket.send_json({"type": "error", "message": "Need at least 3 players"})
+                    continue
+                if any(not p.get('is_connected', True) for p in room.players):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "All players must be connected before starting",
+                    })
                     continue
                 if room.phase != 'waiting':
                     await websocket.send_json({"type": "error", "message": "Game already started"})
@@ -780,7 +895,15 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     continue
 
             elif action == 'place_bid':
-                error = room.place_bid(player_id, int(data.get('bid', 0)))
+                try:
+                    raw_bid = data.get('bid')
+                    if isinstance(raw_bid, bool):
+                        raise ValueError
+                    bid = int(raw_bid)
+                except (TypeError, ValueError):
+                    await websocket.send_json({"type": "error", "message": "Bid must be a whole number"})
+                    continue
+                error = room.place_bid(player_id, bid)
                 if error:
                     await websocket.send_json({"type": "error", "message": error})
                     continue
@@ -792,6 +915,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     continue
 
             elif action == 'next_round':
+                player = next((p for p in room.players if p['id'] == player_id), None)
+                if not player or not player['is_host']:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Only the host can start the next round",
+                    })
+                    continue
                 room.next_round()
 
             elif action == 'new_game':
@@ -837,6 +967,24 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
                     })
                 continue
 
+            elif action == 'leave_room':
+                error = room.leave_player(player_id)
+                if error:
+                    await websocket.send_json({"type": "error", "message": error})
+                    continue
+                if room.connections.get(player_id) is websocket:
+                    del room.connections[player_id]
+                await websocket.send_json({"type": "leave_ack"})
+                await room.broadcast_state()
+                await websocket.close(code=1000)
+                if not room.players:
+                    rooms.pop(room_id, None)
+                return
+
+            else:
+                await websocket.send_json({"type": "error", "message": "Unknown action"})
+                continue
+
             await room.broadcast_state()
 
     except WebSocketDisconnect:
@@ -852,6 +1000,11 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         if existing and room.connections.get(player_id) is None:
             existing['is_connected'] = False
             existing['offline_since'] = time.time()
+            # Lobby disconnects are often brief app-background/reconnect
+            # cycles. Keep the creator as host until they explicitly leave or
+            # the lobby grace-period pruner actually removes their seat.
+            if room.phase != 'waiting':
+                room._ensure_host()
         room.touch()
 
         if room_id in rooms:
@@ -865,6 +1018,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         if existing and room.connections.get(player_id) is None:
             existing['is_connected'] = False
             existing['offline_since'] = time.time()
+            if room.phase != 'waiting':
+                room._ensure_host()
 
 
 @app.on_event("startup")

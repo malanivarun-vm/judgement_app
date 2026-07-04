@@ -99,7 +99,6 @@ export default function HowToPlayScreen() {
           name={v.name}
           desc={v.desc}
           isDefault={v.key === 'v1'}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           onPress={() => router.push(`/game-modes/${v.key}` as any)}
         />
       ))

@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,11 +42,12 @@ import {
   BACKEND_URL,
   buildWebSocketUrl,
 } from '../utils/backend';
+import { seatPositions, seatSize } from '../utils/tableLayout';
+import { useCardSound } from '../utils/useCardSound';
 
 /** Alert.alert is a silent no-op on react-native-web — use window.confirm there. */
 function confirmDialog(title: string, message: string, onConfirm: () => void) {
   if (Platform.OS === 'web') {
-    // eslint-disable-next-line no-alert
     if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) {
       onConfirm();
     }
@@ -56,8 +58,6 @@ function confirmDialog(title: string, message: string, onConfirm: () => void) {
     { text: 'Leave', style: 'destructive', onPress: onConfirm },
   ]);
 }
-import { seatPositions, seatSize } from '../utils/tableLayout';
-import { useCardSound } from '../utils/useCardSound';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
@@ -84,7 +84,7 @@ interface GameState {
   current_round: number;
   total_rounds: number;
   cards_this_round: number;
-  trump_suit: string;
+  trump_suit: string | null;
   dealer_index: number;
   current_player_index: number;
   current_trick: { player_index: number; card: { suit: string; rank: string } }[];
@@ -101,6 +101,8 @@ interface GameState {
   turn_timer_seconds: number;
   round_end_auto_seconds: number;
   pace: string;
+  blind_draw_available: boolean;
+  resume_token?: string | null;
 }
 
 const PACE_OPTIONS = [
@@ -119,6 +121,10 @@ export default function GameScreen() {
   const router = useRouter();
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<any>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumeTokenRef = useRef<string | null>(null);
+  const sessionReadyRef = useRef(false);
+  const resumeStorageKey = `judgement_resume:${params.room_id}:${params.player_id}`;
 
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [connected, setConnected] = useState(false);
@@ -143,6 +149,8 @@ export default function GameScreen() {
   const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
   const playCardSound = useCardSound();
   const prevTrickLenRef = useRef(0);
+  const pendingActionRef = useRef<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   // === Table Talk (chat + live event feed) ===
   const [feed, setFeed] = useState<FeedItem[]>([]);
@@ -280,6 +288,7 @@ export default function GameScreen() {
 
   const connect = useCallback(() => {
     if (intentionalClose.current) return;
+    if (!sessionReadyRef.current) return;
     if (!BACKEND_URL) {
       setError(BACKEND_CONFIG_ERROR);
       return;
@@ -301,12 +310,14 @@ export default function GameScreen() {
       params.player_name || '',
       params.player_id,
       params.host_token,
+      resumeTokenRef.current || undefined,
     );
 
     const socket = new WebSocket(url);
     ws.current = socket;
 
     socket.onopen = () => {
+      if (ws.current !== socket) return;
       setConnected(true);
       setError('');
       void fireHaptic('selection');
@@ -321,6 +332,7 @@ export default function GameScreen() {
     };
 
     socket.onclose = () => {
+      if (ws.current !== socket) return;
       setConnected(false);
       if (heartbeatTimer.current) {
         clearInterval(heartbeatTimer.current);
@@ -333,10 +345,12 @@ export default function GameScreen() {
     };
 
     socket.onerror = () => {
+      if (ws.current !== socket) return;
       setError('Connection error');
     };
 
     socket.onmessage = (event) => {
+      if (ws.current !== socket) return;
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'pong') return;
@@ -344,6 +358,12 @@ export default function GameScreen() {
           const prev = gameStateRef.current;
           gameStateRef.current = data;
           setGameState(data);
+          if (data.resume_token && data.resume_token !== resumeTokenRef.current) {
+            resumeTokenRef.current = data.resume_token;
+            void AsyncStorage.setItem(resumeStorageKey, data.resume_token).catch(() => {});
+          }
+          pendingActionRef.current = null;
+          setPendingAction(null);
           stateReceivedAt.current = Date.now();
 
           // Arm the local mirror of the server's move countdown
@@ -414,6 +434,8 @@ export default function GameScreen() {
             }
           }
         } else if (data.type === 'error') {
+          pendingActionRef.current = null;
+          setPendingAction(null);
           setError(data.message);
           void fireHaptic('error');
           setTimeout(() => setError(''), 4000);
@@ -452,24 +474,45 @@ export default function GameScreen() {
             kind: 'timeout',
             text: `⏱ ${data.player_name} ran out of time — auto-played`,
           });
+        } else if (data.type === 'leave_ack') {
+          intentionalClose.current = true;
+          if (leaveTimer.current) clearTimeout(leaveTimer.current);
+          void AsyncStorage.removeItem(resumeStorageKey).catch(() => {});
+          socket.close();
+          router.replace('/');
         }
       } catch {
         // ignore parse errors
       }
     };
-  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.host_token, trickPop, playCardSound, pushFeed]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.host_token, resumeStorageKey, router, trickPop, playCardSound, pushFeed]);
 
   useEffect(() => {
+    let active = true;
     intentionalClose.current = false;
-    connect();
+    AsyncStorage.getItem(resumeStorageKey)
+      .then((token) => {
+        if (!active) return;
+        resumeTokenRef.current = token;
+        sessionReadyRef.current = true;
+        connect();
+      })
+      .catch(() => {
+        if (!active) return;
+        sessionReadyRef.current = true;
+        connect();
+      });
     return () => {
+      active = false;
       intentionalClose.current = true;
+      sessionReadyRef.current = false;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (leaveTimer.current) clearTimeout(leaveTimer.current);
       if (trickResultTimer.current) clearTimeout(trickResultTimer.current);
       if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
       ws.current?.close();
     };
-  }, [connect]);
+  }, [connect, resumeStorageKey]);
 
   // Reconnect the instant the app returns to the foreground. Mobile
   // browsers/OS suspend WebSockets (and throttle timers) while the app is
@@ -516,12 +559,35 @@ export default function GameScreen() {
   const handleLeave = () => {
     confirmDialog('Leave Game', 'Are you sure you want to leave?', () => {
       intentionalClose.current = true;
-      ws.current?.close();
-      router.replace('/');
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        ws.current.send(JSON.stringify({ action: 'leave_room' }));
+        leaveTimer.current = setTimeout(() => {
+          void AsyncStorage.removeItem(resumeStorageKey).catch(() => {});
+          ws.current?.close();
+          router.replace('/');
+        }, 800);
+      } else {
+        void AsyncStorage.removeItem(resumeStorageKey).catch(() => {});
+        ws.current?.close();
+        router.replace('/');
+      }
     });
   };
 
   const sendAction = async (action: any, haptic: 'selection' | 'light' | 'medium' | 'success' = 'selection') => {
+    const guardedActions = new Set([
+      'start_game', 'place_bid', 'play_card', 'call_trump',
+      'next_round', 'new_game', 'force_action',
+    ]);
+    if (ws.current?.readyState !== WebSocket.OPEN) {
+      setError('Reconnecting — your move was not sent');
+      return;
+    }
+    if (guardedActions.has(action.action)) {
+      if (pendingActionRef.current) return;
+      pendingActionRef.current = action.action;
+      setPendingAction(action.action);
+    }
     await fireHaptic(haptic);
     send(action);
   };
@@ -813,7 +879,7 @@ export default function GameScreen() {
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   style={styles.modeInfoBtn}
                 >
-                  <Text style={styles.modeInfoText}>What's this? →</Text>
+                  <Text style={styles.modeInfoText}>What&apos;s this? →</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1023,8 +1089,10 @@ export default function GameScreen() {
   }
 
   // === BIDDING / PLAYING (Main Game Table) ===
-  const trumpColor = SUIT_DISPLAY_COLORS[gameState.trump_suit] || '#FFF';
-  const trumpSymbol = SUIT_SYMBOLS[gameState.trump_suit] || '';
+  const trumpColor = gameState.trump_suit
+    ? SUIT_DISPLAY_COLORS[gameState.trump_suit] || '#FFF'
+    : COLORS.textSecondary;
+  const trumpSymbol = gameState.trump_suit ? SUIT_SYMBOLS[gameState.trump_suit] || '' : '—';
   const showBiddingModal = phase === 'bidding' && isMyTurn;
   const totalBids = players.filter((p) => p.has_bid).reduce((sum, p) => sum + (p.bid ?? 0), 0);
   const showTrumpSelection = phase === 'trump_selection' || phase === 'trump_selection_v3';
@@ -1072,6 +1140,13 @@ export default function GameScreen() {
             ]}
           />
         </View>
+
+        {!connected && (
+          <View style={styles.reconnectBanner} accessibilityRole="alert">
+            <ActivityIndicator size="small" color={COLORS.gold} />
+            <Text style={styles.reconnectBannerText}>Reconnecting — moves are paused</Text>
+          </View>
+        )}
 
         <View style={styles.tableShell}>
           <View style={styles.statusRail}>
@@ -1180,7 +1255,12 @@ export default function GameScreen() {
                           const isWinner = trickResult && tc.player_index === trickResult.winner_index;
                           return (
                             <View key={i} style={styles.trickCardWrap}>
-                              <TrickCardEntry animate={!trickResult && i === displayTrickCards.length - 1}>
+                              <TrickCardEntry
+                                animate={!trickResult && i === displayTrickCards.length - 1}
+                                playerIndex={tc.player_index}
+                                yourIndex={your_index}
+                                playerCount={players.length}
+                              >
                                 <View style={isWinner ? styles.winnerHighlight : undefined}>
                                   <PlayingCard card={tc.card} size="trick" highlighted={isWinner} />
                                 </View>
@@ -1279,7 +1359,11 @@ export default function GameScreen() {
           <View style={styles.handDock}>
             <HandDisplay
               hand={gameState.your_hand}
-              playableIndices={phase === 'playing' && isMyTurn ? playableIndices : null}
+              playableIndices={
+                phase === 'playing' && isMyTurn && pendingAction !== 'play_card'
+                  ? playableIndices
+                  : null
+              }
               onPlayCard={(card) => void sendAction({ action: 'play_card', card }, 'medium')}
               phase={phase}
             />
@@ -1301,6 +1385,7 @@ export default function GameScreen() {
             restrictedBids={gameState.restricted_bids || []}
             onPlaceBid={(bid) => void sendAction({ action: 'place_bid', bid }, 'medium')}
             secondsLeft={timerRemaining}
+            submitting={pendingAction === 'place_bid'}
           />
 
           {showTrumpSelection && !showBidLock && (
@@ -1328,6 +1413,7 @@ export default function GameScreen() {
                           testID={`trump-suit-${s}`}
                           style={styles.suitButton}
                           onPress={() => void sendAction({ action: 'call_trump', suit: s }, 'medium')}
+                          disabled={pendingAction === 'call_trump'}
                           activeOpacity={0.8}
                         >
                           <Text style={[styles.suitButtonSymbol, { color: SUIT_DISPLAY_COLORS[s] }]}>
@@ -1337,11 +1423,12 @@ export default function GameScreen() {
                         </TouchableOpacity>
                       ))}
                     </View>
-                    {phase === 'trump_selection' && (
+                    {phase === 'trump_selection' && gameState.blind_draw_available && (
                       <TouchableOpacity
                         testID="trump-blind-draw"
                         style={styles.blindDrawButton}
                         onPress={() => void sendAction({ action: 'call_trump', suit: null }, 'medium')}
+                        disabled={pendingAction === 'call_trump'}
                         activeOpacity={0.8}
                       >
                         <Text style={styles.blindDrawText}>Blind Draw — random suit</Text>
@@ -1876,6 +1963,26 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     alignSelf: 'flex-start',
     marginTop: 4,
+  },
+  reconnectBanner: {
+    position: 'absolute',
+    top: 10,
+    alignSelf: 'center',
+    zIndex: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(8,24,17,0.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.45)',
+  },
+  reconnectBannerText: {
+    color: COLORS.goldLight,
+    fontSize: 12,
+    fontWeight: '800',
   },
   statusPillLabel: {
     color: COLORS.textSecondary,

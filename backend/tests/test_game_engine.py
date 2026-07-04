@@ -7,6 +7,7 @@ import os
 sys.path.insert(0, '/app/backend')
 
 from game_engine import (
+    create_play_deck,
     shuffle_and_deal,
     get_trump_suit,
     get_max_cards,
@@ -56,6 +57,14 @@ class TestShuffleAndDeal:
                 # Either different suit (and current comes first) or same suit
                 assert curr_suit_idx <= next_suit_idx
         print("✓ Cards are sorted by suit")
+
+    @pytest.mark.parametrize('num_players', [3, 4, 5, 6, 7])
+    def test_play_deck_removes_only_required_twos(self, num_players):
+        deck = create_play_deck(num_players)
+        removed = 52 % num_players
+        assert len(deck) == 52 - removed
+        assert sum(card['rank'] == '2' for card in deck) == 4 - removed
+        assert len(deck) % num_players == 0
 
 
 class TestTrumpSuit:

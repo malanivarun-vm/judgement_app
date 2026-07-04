@@ -2,14 +2,23 @@
 // the hand direction, scales up, settles with a slight rotation.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, AccessibilityInfo } from 'react-native';
+import { Animated, AccessibilityInfo } from 'react-native';
 
 interface Props {
   animate: boolean;
+  playerIndex?: number;
+  yourIndex?: number;
+  playerCount?: number;
   children: React.ReactNode;
 }
 
-export default function TrickCardEntry({ animate, children }: Props) {
+export default function TrickCardEntry({
+  animate,
+  playerIndex = 0,
+  yourIndex = 0,
+  playerCount = 1,
+  children,
+}: Props) {
   const progress = useRef(new Animated.Value(animate ? 0 : 1)).current;
   const [reduceMotion, setReduceMotion] = useState(false);
 
@@ -23,22 +32,30 @@ export default function TrickCardEntry({ animate, children }: Props) {
       progress.setValue(1);
       return;
     }
-    Animated.timing(progress, {
+    Animated.spring(progress, {
       toValue: 1,
-      duration: 240,
-      easing: Easing.out(Easing.back(1.2)),
+      speed: 17,
+      bounciness: 8,
       useNativeDriver: true,
     }).start();
   }, [animate, reduceMotion, progress]);
 
+  const relativeSeat = (playerIndex - yourIndex + playerCount) % playerCount;
+  const isLocal = relativeSeat === 0;
+  const isLeft = !isLocal && relativeSeat <= playerCount / 2;
+  const fromX = isLocal ? 0 : isLeft ? -130 : 130;
+  const fromY = isLocal ? 150 : -105;
+  const fromRotation = isLocal ? '0deg' : isLeft ? '-14deg' : '14deg';
+
   return (
     <Animated.View
       style={{
-        opacity: progress.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }),
+        opacity: progress.interpolate({ inputRange: [0, 0.22, 1], outputRange: [0, 1, 1] }),
         transform: [
-          { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [36, 0] }) },
-          { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) },
-          { rotate: progress.interpolate({ inputRange: [0, 1], outputRange: ['6deg', '0deg'] }) },
+          { translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [fromX, 0] }) },
+          { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [fromY, 0] }) },
+          { scale: progress.interpolate({ inputRange: [0, 0.72, 1], outputRange: [0.62, 1.08, 1] }) },
+          { rotate: progress.interpolate({ inputRange: [0, 1], outputRange: [fromRotation, '0deg'] }) },
         ],
       }}
     >

@@ -53,7 +53,7 @@ export default function QuickRefScene() {
       {/* Dealer rule */}
       <View style={styles.row}>
         <Text style={styles.sectionHead}>DEALER  </Text>
-        <Text style={styles.cell}>Can't match total predictions = rounds</Text>
+        <Text style={styles.cell}>Must bid 1 when other predictions equal the cards</Text>
       </View>
     </View>
   );

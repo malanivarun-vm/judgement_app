@@ -69,7 +69,7 @@ export default function ScoreBoard({ roundHistory, players, currentRound }: Scor
                 styles.row,
                 index % 2 === 0 && styles.rowAlt,
                 success && styles.rowSuccess,
-                index === 0 && styles.rowFirst,
+                p.id === leader?.id && styles.rowFirst,
               ]}
             >
               <Text style={[styles.cell, styles.nameCol]} numberOfLines={1}>

@@ -2,7 +2,7 @@
 // hit, so 'secured' means "on target so far — now avoid extra tricks",
 // and any trick beyond the bid is an immediate bust.
 
-import { COLORS } from './theme';
+import { CORE_COLORS as COLORS } from './colorTokens';
 
 export type BidStatus = 'pending' | 'chasing' | 'secured' | 'busted';
 

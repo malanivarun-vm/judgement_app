@@ -18,6 +18,7 @@ export function buildWebSocketUrl(
   playerName: string,
   playerId: string,
   hostToken?: string,
+  resumeToken?: string,
 ): string {
   const wsProtocol = backendUrl.startsWith('https://') ? 'wss' : 'ws';
   const wsHost = backendUrl.replace(/^https?:\/\//, '');
@@ -25,6 +26,7 @@ export function buildWebSocketUrl(
     ['player_name', playerName],
     ['player_id', playerId],
     ...(hostToken ? [['host_token', hostToken]] : []),
+    ...(resumeToken ? [['resume_token', resumeToken]] : []),
   ]
     .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
     .join('&');

@@ -1,8 +1,16 @@
 // Scrollable hand grid — auto-scales cards so the hand always fits
 // within the screen width in at most two rows.
 
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Animated,
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+} from 'react-native';
 import PlayingCard, { CardData } from './PlayingCard';
 import { COLORS, CardStyle, CARD_SIZES } from '../utils/theme';
 
@@ -30,6 +38,51 @@ export function handCardScale(count: number, screenWidth: number): number {
   return Math.min(1, fitWidth / CARD_SIZES.hand.width);
 }
 
+function DealtCard({
+  index,
+  reduceMotion,
+  children,
+}: {
+  index: number;
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}) {
+  const deal = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (reduceMotion) {
+      deal.setValue(1);
+      return;
+    }
+    deal.setValue(0);
+    Animated.sequence([
+      Animated.delay(Math.min(index, 12) * 42),
+      Animated.spring(deal, {
+        toValue: 1,
+        speed: 18,
+        bounciness: 7,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [deal, index, reduceMotion]);
+
+  const startRotation = index % 2 === 0 ? '-7deg' : '7deg';
+  return (
+    <Animated.View
+      style={{
+        opacity: deal.interpolate({ inputRange: [0, 0.28, 1], outputRange: [0, 1, 1] }),
+        transform: [
+          { translateY: deal.interpolate({ inputRange: [0, 1], outputRange: [58, 0] }) },
+          { scale: deal.interpolate({ inputRange: [0, 0.72, 1], outputRange: [0.74, 1.04, 1] }) },
+          { rotate: deal.interpolate({ inputRange: [0, 1], outputRange: [startRotation, '0deg'] }) },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
 export default function HandDisplay({
   hand,
   playableIndices = null,
@@ -39,8 +92,13 @@ export default function HandDisplay({
   showLabel = true,
 }: HandDisplayProps) {
   const { width } = useWindowDimensions();
+  const [reduceMotion, setReduceMotion] = useState(false);
   const isPlayPhase = phase === 'playing';
   const scale = handCardScale(hand.length, width);
+
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -61,17 +119,18 @@ export default function HandDisplay({
           const isDimmed = isPlayPhase && playableIndices != null && !playableIndices.has(i);
 
           return (
-            <PlayingCard
-              key={`${card.rank}-${card.suit}-${i}`}
-              card={card}
-              size="hand"
-              scale={scale}
-              cardStyle={cardStyle}
-              highlighted={canPlay}
-              dimmed={isDimmed}
-              onPress={canPlay && onPlayCard ? () => onPlayCard(card, i) : undefined}
-              disabled={!canPlay}
-            />
+            <DealtCard key={`${card.rank}-${card.suit}`} index={i} reduceMotion={reduceMotion}>
+              <PlayingCard
+                card={card}
+                size="hand"
+                scale={scale}
+                cardStyle={cardStyle}
+                highlighted={canPlay}
+                dimmed={isDimmed}
+                onPress={canPlay && onPlayCard ? () => onPlayCard(card, i) : undefined}
+                disabled={!canPlay}
+              />
+            </DealtCard>
           );
         })}
       </ScrollView>

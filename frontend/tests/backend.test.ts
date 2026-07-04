@@ -26,3 +26,18 @@ test('buildWebSocketUrl includes a host token only when supplied', () => {
     'ws://localhost:8000/api/ws/ABCD?player_name=Guest&player_id=p2',
   );
 });
+
+test('buildWebSocketUrl keeps the private resume token out unless supplied', () => {
+  const url = buildWebSocketUrl(
+    'https://api.example.com',
+    'ABCD',
+    'Returning Player',
+    'p3',
+    undefined,
+    'resume secret',
+  );
+  assert.equal(
+    url,
+    'wss://api.example.com/api/ws/ABCD?player_name=Returning%20Player&player_id=p3&resume_token=resume%20secret',
+  );
+});

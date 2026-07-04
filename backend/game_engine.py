@@ -12,8 +12,29 @@ def create_deck() -> List[Dict]:
     return [{'suit': s, 'rank': r} for s in SUITS for r in RANKS]
 
 
-def shuffle_and_deal(num_players: int, cards_per_player: int) -> List[List[Dict]]:
+def create_play_deck(num_players: int) -> List[Dict]:
+    """Build the divisible deck used by Judgement.
+
+    The physical game removes a random selection of 2s when 52 is not
+    divisible by the player count. Keeping this in one function makes full
+    and partial deals follow the same rule.
+    """
+    if num_players < 3 or num_players > 7:
+        raise ValueError("Judgement requires 3 to 7 players")
+
     deck = create_deck()
+    remove_count = len(deck) % num_players
+    if remove_count:
+        twos = [card for card in deck if card['rank'] == '2']
+        for card in random.sample(twos, remove_count):
+            deck.remove(card)
+    return deck
+
+
+def shuffle_and_deal(num_players: int, cards_per_player: int) -> List[List[Dict]]:
+    deck = create_play_deck(num_players)
+    if cards_per_player < 1 or cards_per_player * num_players > len(deck):
+        raise ValueError("Invalid cards per player")
     random.shuffle(deck)
     hands = []
     for i in range(num_players):
@@ -33,7 +54,14 @@ def shuffle_and_deal_partial(num_players: int, cards_per_player: int, batch_size
     The remaining deck holds the un-dealt cards; the second batch
     (cards_per_player - batch_size per player) is dealt from it later.
     """
-    deck = create_deck()
+    deck = create_play_deck(num_players)
+    if (
+        cards_per_player < 1
+        or batch_size < 1
+        or batch_size > cards_per_player
+        or cards_per_player * num_players > len(deck)
+    ):
+        raise ValueError("Invalid partial deal")
     random.shuffle(deck)
     hands = []
     for i in range(num_players):

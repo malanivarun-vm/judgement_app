@@ -1,7 +1,14 @@
 // Compact seat chip pinned to the oval table edge for one opponent.
 
-import React from 'react';
-import { View, Text, StyleSheet, ViewStyle } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Animated,
+  View,
+  Text,
+  StyleSheet,
+  ViewStyle,
+} from 'react-native';
 import { COLORS } from '../utils/theme';
 import { bidStatus, BID_STATUS_COLORS, BID_STATUS_LABELS, scoreColor } from '../utils/bidStatus';
 
@@ -26,14 +33,44 @@ interface Props {
 }
 
 export default function OpponentSeat({ player, isTurn, isDealer, phase, style }: Props) {
+  const focus = useRef(new Animated.Value(isTurn ? 1 : 0)).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
   const hasBid = player.has_bid || player.bid !== null;
   const st = hasBid ? bidStatus(player.bid, player.tricks_won) : 'pending';
   const statusLabel = BID_STATUS_LABELS[st];
 
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion) {
+      focus.setValue(isTurn ? 1 : 0);
+      return;
+    }
+    Animated.spring(focus, {
+      toValue: isTurn ? 1 : 0,
+      speed: 16,
+      bounciness: isTurn ? 8 : 2,
+      useNativeDriver: true,
+    }).start();
+  }, [focus, isTurn, reduceMotion]);
+
   return (
-    <View
+    <Animated.View
       testID={`opponent-${player.id}`}
-      style={[styles.seat, isTurn && styles.seatActive, !player.is_connected && styles.seatOffline, style]}
+      style={[
+        styles.seat,
+        isTurn && styles.seatActive,
+        !player.is_connected && styles.seatOffline,
+        style,
+        {
+          transform: [
+            { translateY: focus.interpolate({ inputRange: [0, 1], outputRange: [0, -5] }) },
+            { scale: focus.interpolate({ inputRange: [0, 1], outputRange: [1, 1.045] }) },
+          ],
+        },
+      ]}
     >
       <View style={styles.topRow}>
         <View style={[styles.avatar, isTurn && styles.avatarActive]}>
@@ -60,7 +97,7 @@ export default function OpponentSeat({ player, isTurn, isDealer, phase, style }:
         </Text>
       </View>
       {!player.is_connected && <Text style={styles.offline}>Offline</Text>}
-    </View>
+    </Animated.View>
   );
 }
 

@@ -49,6 +49,7 @@ export default function PlayingCard({ card, size = 'hand', scale = 1, cardStyle 
   const [reduceMotion, setReduceMotion] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const liftAnim  = useRef(new Animated.Value(0)).current;
+  const tiltAnim  = useRef(new Animated.Value(0)).current;
 
   const base  = CARD_SIZES[size];
   const baseF = FONT_SIZES[size];
@@ -74,10 +75,24 @@ export default function PlayingCard({ card, size = 'hand', scale = 1, cardStyle 
       Animated.spring(scaleAnim, { toValue: highlighted ? 1.05 : 1, useNativeDriver: true, friction: 6, tension: 140 }),
       Animated.spring(liftAnim,  { toValue: highlighted ? -8  : 0, useNativeDriver: true, friction: 6, tension: 140 }),
     ]).start();
-  }, [highlighted, reduceMotion]);
+  }, [highlighted, liftAnim, reduceMotion, scaleAnim]);
 
-  const onPressIn  = () => { if (!reduceMotion) Animated.spring(scaleAnim, { toValue: 0.95, useNativeDriver: true, friction: 6, tension: 140 }).start(); };
-  const onPressOut = () => { if (!reduceMotion) Animated.spring(scaleAnim, { toValue: highlighted ? 1.05 : 1, useNativeDriver: true, friction: 6, tension: 140 }).start(); };
+  const onPressIn = () => {
+    if (reduceMotion) return;
+    Animated.parallel([
+      Animated.spring(scaleAnim, { toValue: 0.92, useNativeDriver: true, friction: 6, tension: 180 }),
+      Animated.spring(liftAnim, { toValue: -2, useNativeDriver: true, friction: 7, tension: 160 }),
+      Animated.spring(tiltAnim, { toValue: 1, useNativeDriver: true, friction: 7, tension: 160 }),
+    ]).start();
+  };
+  const onPressOut = () => {
+    if (reduceMotion) return;
+    Animated.parallel([
+      Animated.spring(scaleAnim, { toValue: highlighted ? 1.05 : 1, useNativeDriver: true, friction: 6, tension: 140 }),
+      Animated.spring(liftAnim, { toValue: highlighted ? -8 : 0, useNativeDriver: true, friction: 6, tension: 140 }),
+      Animated.spring(tiltAnim, { toValue: 0, useNativeDriver: true, friction: 7, tension: 160 }),
+    ]).start();
+  };
 
   const borderColor = highlighted ? COLORS.gold : cardStyle === 'foil' ? 'rgba(212,175,55,0.55)' : 'rgba(210,210,200,0.85)';
   const borderWidth = (highlighted || cardStyle === 'foil') ? 1.5 : 1;
@@ -102,7 +117,16 @@ export default function PlayingCard({ card, size = 'hand', scale = 1, cardStyle 
           shadowOpacity: highlighted ? 0.55 : 0.28,
           shadowRadius: highlighted ? 12 : 8,
           elevation: highlighted ? 10 : 5,
-          transform: [{ scale: scaleAnim }, { translateY: liftAnim }],
+          transform: [
+            { scale: scaleAnim },
+            { translateY: liftAnim },
+            {
+              rotate: tiltAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['0deg', '-1.8deg'],
+              }),
+            },
+          ],
         },
       ]}>
         {/* Top shine */}

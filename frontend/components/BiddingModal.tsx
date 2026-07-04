@@ -1,9 +1,9 @@
 // Redesigned bidding modal with giant number picker + hand grid preview.
 // Drop-in replacement — same required props as previous BiddingModal.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  Animated, View, Text, TouchableOpacity, StyleSheet,
   Modal, Platform, AccessibilityInfo, ScrollView,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -14,7 +14,7 @@ interface BiddingModalProps {
   visible: boolean;
   yourHand: CardData[];
   cardsThisRound: number;
-  trumpSuit: string;
+  trumpSuit: string | null;
   currentRound: number;
   totalRounds: number;
   restrictedBids: number[];
@@ -22,20 +22,25 @@ interface BiddingModalProps {
   cardStyle?: CardStyle;
   /** Seconds left on the server move timer; turns red ≤3s. */
   secondsLeft?: number | null;
+  submitting?: boolean;
 }
 
 export default function BiddingModal({
   visible, yourHand, cardsThisRound, trumpSuit,
   currentRound, totalRounds, restrictedBids, onPlaceBid,
   cardStyle = 'minimal', secondsLeft = null,
+  submitting = false,
 }: BiddingModalProps) {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [selectedBid, setSelectedBid]   = useState(0);
+  const entrance = useRef(new Animated.Value(0)).current;
+  const bidPop = useRef(new Animated.Value(1)).current;
 
   const bidOptions   = useMemo(() => Array.from({ length: cardsThisRound + 1 }, (_, i) => i), [cardsThisRound]);
-  const isRestricted = (b: number) => restrictedBids.includes(b);
+  const restrictedSet = useMemo(() => new Set(restrictedBids), [restrictedBids]);
+  const isRestricted = (b: number) => restrictedSet.has(b);
 
-  const trumpSymbol = SUIT_SYMBOLS[trumpSuit] || '';
+  const trumpSymbol = trumpSuit ? SUIT_SYMBOLS[trumpSuit] || '' : '';
   const trumpColor  = trumpSuit === 'hearts' || trumpSuit === 'diamonds' ? COLORS.suitRed : '#FFFFFF';
 
   const cardSize = yourHand.length > 8 ? 'small' : 'bid';
@@ -46,15 +51,39 @@ export default function BiddingModal({
 
   useEffect(() => {
     if (!visible) return;
-    const first = bidOptions.find(b => !isRestricted(b)) ?? 0;
+    const first = bidOptions.find(b => !restrictedSet.has(b)) ?? 0;
     setSelectedBid(first);
-  }, [visible, bidOptions]);
+    if (reduceMotion) {
+      entrance.setValue(1);
+      return;
+    }
+    entrance.setValue(0);
+    Animated.spring(entrance, {
+      toValue: 1,
+      speed: 15,
+      bounciness: 7,
+      useNativeDriver: true,
+    }).start();
+  }, [visible, bidOptions, entrance, reduceMotion, restrictedSet]);
+
+  const animateBid = () => {
+    if (reduceMotion) return;
+    bidPop.setValue(0.78);
+    Animated.spring(bidPop, {
+      toValue: 1,
+      speed: 24,
+      bounciness: 10,
+      useNativeDriver: true,
+    }).start();
+  };
 
   const haptic = async (kind: 'selection' | 'medium') => {
     try {
-      kind === 'selection'
-        ? await Haptics.selectionAsync()
-        : await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (kind === 'selection') {
+        await Haptics.selectionAsync();
+      } else {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
     } catch { /* ignore */ }
   };
 
@@ -63,6 +92,7 @@ export default function BiddingModal({
     while (next >= 0 && next <= cardsThisRound && isRestricted(next)) next += delta;
     if (next >= 0 && next <= cardsThisRound && !isRestricted(next)) {
       setSelectedBid(next);
+      animateBid();
       await haptic('selection');
     }
   };
@@ -70,6 +100,7 @@ export default function BiddingModal({
   const handleDot = async (b: number) => {
     if (isRestricted(b)) return;
     setSelectedBid(b);
+    animateBid();
     await haptic('selection');
   };
 
@@ -86,8 +117,26 @@ export default function BiddingModal({
       statusBarTranslucent={Platform.OS === 'android'}
     >
       <View style={styles.overlay}>
-        <View style={styles.backdrop} />
-        <View style={styles.sheet}>
+        <Animated.View
+          style={[
+            styles.backdrop,
+            {
+              opacity: entrance.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }),
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.sheet,
+            {
+              opacity: entrance,
+              transform: [
+                { translateY: entrance.interpolate({ inputRange: [0, 1], outputRange: [56, 0] }) },
+                { scale: entrance.interpolate({ inputRange: [0, 0.75, 1], outputRange: [0.92, 1.018, 1] }) },
+              ],
+            },
+          ]}
+        >
 
           {/* ── Hand preview ─────────────────────────────── */}
           <Text style={styles.sectionLabel}>
@@ -124,7 +173,10 @@ export default function BiddingModal({
           <View style={styles.chips}>
             <MetaChip label={`Round ${currentRound}/${totalRounds}`} />
             <MetaChip label={`${cardsThisRound} cards`} />
-            <MetaChip label={`Trump ${trumpSymbol} ${trumpSuit}`} color={trumpColor} />
+            <MetaChip
+              label={trumpSuit ? `Trump ${trumpSymbol} ${trumpSuit}` : 'Trump chosen after bids'}
+              color={trumpSuit ? trumpColor : COLORS.textSecondary}
+            />
           </View>
 
           {/* ── Giant number picker ──────────────────────── */}
@@ -139,7 +191,9 @@ export default function BiddingModal({
             </TouchableOpacity>
 
             <View style={styles.numberWrap}>
-              <Text style={styles.bigNumber}>{selectedBid}</Text>
+              <Animated.Text style={[styles.bigNumber, { transform: [{ scale: bidPop }] }]}>
+                {selectedBid}
+              </Animated.Text>
               <Text style={styles.outOf}>out of {cardsThisRound}</Text>
             </View>
 
@@ -176,14 +230,17 @@ export default function BiddingModal({
           {/* ── Confirm ──────────────────────────────────── */}
           <TouchableOpacity
             testID="confirm-bid-button"
-            style={styles.confirmBtn}
-            onPress={handleConfirm}
-            activeOpacity={0.88}
-          >
-            <Text style={styles.confirmTxt}>Lock in {selectedBid} →</Text>
+            style={[styles.confirmBtn, submitting && styles.confirmBtnDisabled]}
+              onPress={handleConfirm}
+              disabled={submitting}
+              activeOpacity={0.88}
+            >
+            <Text style={styles.confirmTxt}>
+              {submitting ? 'Locking bid…' : `Lock in ${selectedBid} →`}
+            </Text>
           </TouchableOpacity>
 
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -311,6 +368,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.45, shadowRadius: 18,
     shadowOffset: { width: 0, height: 0 },
     elevation: 8,
+  },
+  confirmBtnDisabled: {
+    opacity: 0.62,
   },
   confirmTxt: { color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 0.5 },
 });
