@@ -16,6 +16,7 @@ import AnimatedScore from './AnimatedScore';
 export interface SeatPlayer {
   id: string;
   name: string;
+  avatar?: string;
   bid: number | null;
   has_bid: boolean;
   tricks_won: number;
@@ -101,7 +102,7 @@ export default function OpponentSeat({ player, isTurn, isDealer, phase, style }:
       <View style={styles.topRow}>
         <View style={[styles.avatar, isTurn && styles.avatarActive]}>
           <Text style={styles.avatarText}>
-            {player.is_bot ? '♟' : player.name[0]?.toUpperCase()}
+            {player.avatar || (player.is_bot ? '♟' : player.name[0]?.toUpperCase())}
           </Text>
         </View>
         <Text style={styles.name} numberOfLines={1}>{player.name}</Text>

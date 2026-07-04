@@ -1,5 +1,11 @@
 // Falling gold suit glyphs for the game-over celebration.
 // Pure Animated API — no extra dependencies. Respects reduce-motion.
+//
+// Each particle waits its random stagger ONCE, then falls on an unbroken
+// loop. (Putting the delay inside the loop made every particle sit
+// invisible for up to ~45% of each cycle, so the rain pulsed in bursts —
+// the "glitch".) No text shadows: 14+ shadowed glyphs animating per frame
+// drop frames on Android.
 
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing, StyleSheet, useWindowDimensions } from 'react-native';
@@ -12,7 +18,7 @@ const GLYPHS = [
   SUIT_SYMBOLS.clubs,
 ];
 
-const PARTICLES = 14;
+const PARTICLES = 18;
 
 interface ParticleSpec {
   glyph: string;
@@ -28,20 +34,22 @@ function Particle({ spec, height, width }: { spec: ParticleSpec; height: number;
   const t = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.delay(spec.delay),
-        Animated.timing(t, {
-          toValue: 1,
-          duration: spec.duration,
-          easing: Easing.in(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(t, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
+    const anim = Animated.sequence([
+      Animated.delay(spec.delay),
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(t, {
+            toValue: 1,
+            duration: spec.duration,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(t, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ])
+      ),
+    ]);
+    anim.start();
+    return () => anim.stop();
   }, [t, spec.delay, spec.duration]);
 
   return (
@@ -53,8 +61,8 @@ function Particle({ spec, height, width }: { spec: ParticleSpec; height: number;
           fontSize: spec.size,
           color: spec.color,
           opacity: t.interpolate({
-            inputRange: [0, 0.1, 0.85, 1],
-            outputRange: [0, 0.85, 0.6, 0],
+            inputRange: [0, 0.08, 0.85, 1],
+            outputRange: [0, 0.55, 0.4, 0],
           }),
           transform: [
             {
@@ -92,9 +100,9 @@ export default function GoldRain({ reduceMotion }: { reduceMotion?: boolean }) {
       Array.from({ length: PARTICLES }, (_, i) => ({
         glyph: GLYPHS[i % GLYPHS.length],
         left: Math.random(),
-        size: 16 + Math.random() * 22,
-        delay: Math.random() * 2600,
-        duration: 3200 + Math.random() * 2400,
+        size: 13 + Math.random() * 18,
+        delay: Math.random() * 1600,
+        duration: 3600 + Math.random() * 2600,
         drift: (Math.random() - 0.5) * 90,
         color: i % 3 === 0 ? '#F3E5AB' : i % 3 === 1 ? '#D4AF37' : 'rgba(255,255,255,0.7)',
       })),
@@ -121,8 +129,5 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     fontFamily: 'serif',
-    textShadowColor: 'rgba(212,175,55,0.4)',
-    textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 0 },
   },
 });

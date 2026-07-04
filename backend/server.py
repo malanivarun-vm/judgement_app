@@ -532,6 +532,7 @@ class GameRoom:
             players_info.append({
                 'id': p['id'],
                 'name': p['name'],
+                'avatar': p.get('avatar', ''),
                 'is_host': p['is_host'],
                 'bid': p.get('bid'),
                 'tricks_won': p.get('tricks_won', 0),
@@ -1027,7 +1028,7 @@ async def check_room(room_id: str):
     rid = room_id.upper()
     exists = rid in rooms
     if not exists:
-        return {"exists": False, "joinable": False, "waiting_for_lobby": False}
+        return {"exists": False, "joinable": False, "waiting_for_lobby": False, "players": 0, "capacity": 7}
     room = rooms[rid]
     waiting_for_lobby = room.phase != 'waiting'
     capacity = 7
@@ -1036,6 +1037,8 @@ async def check_room(room_id: str):
         "exists": True,
         "joinable": joinable,
         "waiting_for_lobby": waiting_for_lobby,
+        "players": len(room.players),
+        "capacity": capacity,
     }
 
 
@@ -1048,6 +1051,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
     player_name = websocket.query_params.get('player_name', 'Player')
     player_name = player_name.strip()[:16] or 'Player'
+    # Emoji avatars are multi-codepoint; 8 chars covers any single emoji.
+    player_avatar = websocket.query_params.get('avatar', '').strip()[:8]
     player_id = websocket.query_params.get('player_id', str(uuid.uuid4()))
     supplied_host_token = websocket.query_params.get('host_token', '')
     supplied_resume_token = websocket.query_params.get('resume_token', '')
@@ -1078,6 +1083,8 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         existing['is_connected'] = True
         existing['offline_since'] = None
         existing['name'] = player_name
+        if player_avatar:
+            existing['avatar'] = player_avatar
         if (
             player_id == room.creator_player_id
             and not room.creator_relinquished
@@ -1102,6 +1109,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         new_player = {
             'id': player_id,
             'name': player_name,
+            'avatar': player_avatar,
             'is_host': claims_host,
             'hand': [],
             'bid': None,

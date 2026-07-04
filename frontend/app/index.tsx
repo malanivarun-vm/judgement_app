@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Modal,
   StatusBar,
   Animated,
   Easing,
@@ -22,10 +23,20 @@ import { COLORS, SUIT_SYMBOLS, SERIF } from '../utils/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parseRoomCodeParam } from '../utils/share';
 import { requireBackendUrl } from '../utils/backend';
+import { AVATARS, pickRandomAvatar, sanitizeAvatar } from '../utils/avatars';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
 const PLAYER_NAME_KEY = 'judgement_player_name';
+const PLAYER_AVATAR_KEY = 'judgement_player_avatar';
+
+type InviteState = {
+  code: string;
+  status: 'checking' | 'open' | 'gone';
+  players?: number;
+  capacity?: number;
+  message?: string;
+};
 
 function generateId(): string {
   return 'p_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
@@ -36,8 +47,13 @@ export default function HomeScreen() {
   const { code: codeParam } = useLocalSearchParams<{ code?: string }>();
   const [playerName, setPlayerName] = useState('');
   const [roomCode, setRoomCode] = useState('');
-  const [loadingAction, setLoadingAction] = useState<'create' | 'join' | null>(null);
+  const [avatar, setAvatar] = useState('');
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [error, setError] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [invite, setInvite] = useState<InviteState | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
   const floatAnim = useRef(new Animated.Value(0)).current;
   const entryAnim = useRef(new Animated.Value(0)).current;
@@ -62,7 +78,39 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const parsed = parseRoomCodeParam(codeParam);
-    if (parsed) setRoomCode(parsed);
+    if (!parsed) return;
+    setRoomCode(parsed);
+    // Shared link: skip the create/join decision and raise the invite sheet.
+    let cancelled = false;
+    setInvite({ code: parsed, status: 'checking' });
+    (async () => {
+      try {
+        const backendUrl = requireBackendUrl();
+        const res = await fetch(`${backendUrl}/api/rooms/${parsed}/exists`);
+        if (!res.ok) throw new Error(`Room lookup failed (${res.status})`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.exists) {
+          setInvite({ code: parsed, status: 'gone', message: 'That table doesn’t exist anymore.' });
+        } else if (!data.joinable) {
+          setInvite({ code: parsed, status: 'gone', message: 'That table is full or the game already started.' });
+        } else {
+          setInvite({
+            code: parsed,
+            status: 'open',
+            players: typeof data.players === 'number' ? data.players : undefined,
+            capacity: typeof data.capacity === 'number' ? data.capacity : undefined,
+          });
+        }
+      } catch {
+        // Lookup failed (offline, cold start) — fall back to the normal
+        // home screen with the code prefilled rather than a dead sheet.
+        if (!cancelled) setInvite(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [codeParam]);
 
   useEffect(() => {
@@ -74,6 +122,30 @@ export default function HomeScreen() {
         // storage unavailable — name entry stays manual
       });
   }, []);
+
+  useEffect(() => {
+    // Auto-assign an avatar on first launch so nobody is forced to choose;
+    // tapping it swaps. Persisted alongside the name.
+    AsyncStorage.getItem(PLAYER_AVATAR_KEY)
+      .then((saved: string | null) => {
+        const valid = sanitizeAvatar(saved);
+        if (valid) {
+          setAvatar(valid);
+        } else {
+          const assigned = pickRandomAvatar();
+          setAvatar(assigned);
+          void AsyncStorage.setItem(PLAYER_AVATAR_KEY, assigned).catch(() => {});
+        }
+      })
+      .catch(() => setAvatar(pickRandomAvatar()));
+  }, []);
+
+  const selectAvatar = (next: string) => {
+    setAvatar(next);
+    setAvatarPickerOpen(false);
+    void fireHaptic('selection');
+    void AsyncStorage.setItem(PLAYER_AVATAR_KEY, next).catch(() => {});
+  };
 
   useEffect(() => {
     if (reduceMotion) return;
@@ -122,13 +194,17 @@ export default function HomeScreen() {
     }).start();
   };
 
+  const codeValid = parseRoomCodeParam(roomCode) !== null;
+  const busy = creating || joining;
+
   const createRoom = async () => {
     if (!playerName.trim()) {
       showNameRequired();
       return;
     }
     setError('');
-    setLoadingAction('create');
+    setJoinError('');
+    setCreating(true);
     try {
       void fireHaptic('medium');
       const backendUrl = requireBackendUrl();
@@ -147,27 +223,26 @@ export default function HomeScreen() {
           player_name: playerName.trim(),
           player_id: playerId,
           host_token: data.host_token,
+          avatar,
         },
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create room. Please try again.');
     } finally {
-      setLoadingAction(null);
+      setCreating(false);
     }
   };
 
-  const joinRoom = async () => {
-    if (!playerName.trim()) {
-      showNameRequired();
-      return;
-    }
-    const code = parseRoomCodeParam(roomCode);
+  const joinWithCode = async (
+    rawCode: string,
+    onFail: (message: string) => void,
+  ): Promise<void> => {
+    const code = parseRoomCodeParam(rawCode);
     if (!code) {
-      setError('Enter a valid 4-letter room code.');
+      onFail('Enter a valid 4-letter room code.');
       return;
     }
-    setError('');
-    setLoadingAction('join');
+    setJoining(true);
     try {
       void fireHaptic('selection');
       const backendUrl = requireBackendUrl();
@@ -175,11 +250,11 @@ export default function HomeScreen() {
       if (!res.ok) throw new Error(`Room lookup failed (${res.status})`);
       const data = await res.json();
       if (!data.exists) {
-        setError('Room not found. Check the code and try again.');
+        onFail('That table doesn’t exist — check the code.');
         return;
       }
       if (!data.joinable) {
-        setError('That room is currently full.');
+        onFail('That table is full or the game already started.');
         return;
       }
       const playerId = generateId();
@@ -190,13 +265,41 @@ export default function HomeScreen() {
           room_id: code,
           player_name: playerName.trim(),
           player_id: playerId,
+          avatar,
         },
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not check room. Please try again.');
+      onFail(err instanceof Error ? err.message : 'Could not check room. Please try again.');
     } finally {
-      setLoadingAction(null);
+      setJoining(false);
     }
+  };
+
+  const joinRoom = async () => {
+    if (!playerName.trim()) {
+      showNameRequired();
+      return;
+    }
+    setError('');
+    setJoinError('');
+    await joinWithCode(roomCode, setJoinError);
+  };
+
+  const joinFromInvite = async () => {
+    if (!invite || invite.status !== 'open') return;
+    if (!playerName.trim()) {
+      setInvite({ ...invite, message: 'Enter your name to take a seat.' });
+      return;
+    }
+    setInvite({ ...invite, message: undefined });
+    await joinWithCode(invite.code, (message) =>
+      setInvite((current) => (current ? { ...current, message } : current)),
+    );
+  };
+
+  const dismissInvite = () => {
+    setInvite(null);
+    void fireHaptic('selection');
   };
 
   return (
@@ -388,67 +491,109 @@ export default function HomeScreen() {
             ]}
           >
             <Text style={styles.label}>Your Name</Text>
-            <TextInput
-              testID="player-name-input"
-              style={styles.input}
-              value={playerName}
-              onChangeText={(value) => {
-                setPlayerName(value);
-                if (value.trim()) setError('');
-              }}
-              placeholder="Enter your name"
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              maxLength={16}
-              autoCapitalize="words"
-            />
+            <View style={styles.nameRow}>
+              <TouchableOpacity
+                testID="avatar-chip"
+                style={styles.avatarChip}
+                onPress={() => setAvatarPickerOpen((open) => !open)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Change your avatar"
+              >
+                <Text style={styles.avatarChipEmoji}>{avatar}</Text>
+                <View style={styles.avatarEditBadge}>
+                  <Text style={styles.avatarEditBadgeText}>✎</Text>
+                </View>
+              </TouchableOpacity>
+              <TextInput
+                testID="player-name-input"
+                style={[styles.input, styles.nameInput]}
+                value={playerName}
+                onChangeText={setPlayerName}
+                placeholder="Enter your name"
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                maxLength={16}
+                autoCapitalize="words"
+              />
+            </View>
+            {avatarPickerOpen ? (
+              <View style={styles.avatarGrid}>
+                {AVATARS.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[styles.avatarOption, option === avatar && styles.avatarOptionSelected]}
+                    onPress={() => selectAvatar(option)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Choose avatar ${option}`}
+                  >
+                    <Text style={styles.avatarOptionEmoji}>{option}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
           </Animated.View>
 
-          <View style={[styles.actionRow, isNarrow && styles.actionRowNarrow]}>
-            <View style={styles.actionCreate}>
-              <Text style={styles.sectionLabel}>Create a room</Text>
-              <TouchableOpacity
-                testID="create-room-btn"
-                style={styles.goldButton}
-                onPress={createRoom}
-                disabled={loadingAction !== null}
-                activeOpacity={0.8}
-              >
-                {loadingAction === 'create' ? (
-                  <ActivityIndicator color="#000" />
-                ) : (
-                  <Text style={styles.goldButtonText}>Create Room</Text>
-                )}
-              </TouchableOpacity>
+          <View style={styles.actionsBlock}>
+            <TouchableOpacity
+              testID="create-room-btn"
+              style={[styles.goldButton, busy && styles.buttonBusy]}
+              onPress={createRoom}
+              disabled={busy}
+              activeOpacity={0.8}
+            >
+              {creating ? (
+                <View style={styles.buttonLoadingRow}>
+                  <ActivityIndicator color="#000" size="small" />
+                  <Text style={styles.goldButtonText}>Dealing you in…</Text>
+                </View>
+              ) : (
+                <Text style={styles.goldButtonText}>Create Room</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.orDividerRow}>
+              <View style={styles.orDividerRule} />
+              <Text style={styles.sectionLabel}>Or join with a code</Text>
+              <View style={styles.orDividerRule} />
             </View>
 
-            <View style={[styles.actionDivider, isNarrow && styles.actionDividerNarrow]} />
-
-            <View style={styles.actionJoin}>
-              <Text style={styles.sectionLabel}>Have a code?</Text>
-              <TextInput
-                testID="room-code-input"
-                style={[styles.input, styles.codeInput]}
-                value={roomCode}
-                onChangeText={(t) => setRoomCode(t.toUpperCase())}
-                placeholder="ABCD"
-                placeholderTextColor="rgba(255,255,255,0.25)"
-                maxLength={4}
-                autoCapitalize="characters"
-              />
-              <TouchableOpacity
-                testID="join-room-btn"
-                style={styles.outlineButton}
-                onPress={joinRoom}
-                disabled={loadingAction !== null}
-                activeOpacity={0.8}
-              >
-                {loadingAction === 'join' ? (
-                  <ActivityIndicator color="#f6d88a" />
-                ) : (
-                  <Text style={styles.outlineButtonText}>Join Room</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+            <TextInput
+              testID="room-code-input"
+              style={[styles.input, styles.codeInput, joinError ? styles.codeInputError : null]}
+              value={roomCode}
+              onChangeText={(t) => {
+                setRoomCode(t.toUpperCase());
+                if (joinError) setJoinError('');
+              }}
+              placeholder="ABCD"
+              placeholderTextColor="rgba(255,255,255,0.45)"
+              maxLength={4}
+              autoCapitalize="characters"
+            />
+            {joinError ? (
+              <Text style={styles.joinErrorText} accessibilityRole="alert">
+                {joinError}
+              </Text>
+            ) : null}
+            <TouchableOpacity
+              testID="join-room-btn"
+              style={[styles.outlineButton, (!codeValid || busy) && styles.outlineButtonDisabled]}
+              onPress={joinRoom}
+              disabled={!codeValid || busy}
+              activeOpacity={0.8}
+            >
+              {joining ? (
+                <View style={styles.buttonLoadingRow}>
+                  <ActivityIndicator color={COLORS.goldLight} size="small" />
+                  <Text style={styles.outlineButtonText}>Finding your table…</Text>
+                </View>
+              ) : (
+                <Text style={[styles.outlineButtonText, !codeValid && styles.outlineButtonTextDisabled]}>
+                  Join Room
+                </Text>
+              )}
+            </TouchableOpacity>
           </View>
         </Animated.View>
 
@@ -473,6 +618,108 @@ export default function HomeScreen() {
         </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Shared-link invitation sheet */}
+      <Modal
+        visible={invite !== null}
+        transparent
+        animationType={reduceMotion ? 'fade' : 'slide'}
+        onRequestClose={dismissInvite}
+      >
+        <View style={styles.sheetScrim}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetGrabber} />
+            {invite?.status === 'checking' ? (
+              <View style={styles.sheetChecking}>
+                <ActivityIndicator color={COLORS.goldLight} />
+                <Text style={styles.sheetCheckingText}>Finding your table…</Text>
+              </View>
+            ) : invite?.status === 'gone' ? (
+              <>
+                <Text style={styles.sheetKicker}>YOU'RE INVITED</Text>
+                <Text style={styles.sheetTitle}>
+                  Table <Text style={styles.sheetCode}>{invite.code}</Text>
+                </Text>
+                <Text style={styles.sheetError}>{invite.message}</Text>
+                <TouchableOpacity
+                  testID="invite-back-btn"
+                  style={styles.outlineButton}
+                  onPress={dismissInvite}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.outlineButtonText}>Back to Home</Text>
+                </TouchableOpacity>
+              </>
+            ) : invite ? (
+              <>
+                <Text style={styles.sheetKicker}>YOU'RE INVITED</Text>
+                <Text style={styles.sheetTitle}>
+                  Table <Text style={styles.sheetCode}>{invite.code}</Text>
+                </Text>
+                {typeof invite.players === 'number' && typeof invite.capacity === 'number' ? (
+                  <Text style={styles.sheetSub}>
+                    {invite.players} of {invite.capacity} seats taken
+                  </Text>
+                ) : null}
+                <View style={styles.avatarGrid}>
+                  {AVATARS.map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.avatarOption, option === avatar && styles.avatarOptionSelected]}
+                      onPress={() => selectAvatar(option)}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Choose avatar ${option}`}
+                    >
+                      <Text style={styles.avatarOptionEmoji}>{option}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.label}>Your Name</Text>
+                <TextInput
+                  testID="invite-name-input"
+                  style={styles.input}
+                  value={playerName}
+                  onChangeText={setPlayerName}
+                  placeholder="Enter your name"
+                  placeholderTextColor="rgba(255,255,255,0.3)"
+                  maxLength={16}
+                  autoCapitalize="words"
+                />
+                {invite.message ? (
+                  <Text style={styles.joinErrorText} accessibilityRole="alert">
+                    {invite.message}
+                  </Text>
+                ) : null}
+                <TouchableOpacity
+                  testID="invite-join-btn"
+                  style={[styles.goldButton, styles.sheetJoinButton, joining && styles.buttonBusy]}
+                  onPress={joinFromInvite}
+                  disabled={joining}
+                  activeOpacity={0.8}
+                >
+                  {joining ? (
+                    <View style={styles.buttonLoadingRow}>
+                      <ActivityIndicator color="#000" size="small" />
+                      <Text style={styles.goldButtonText}>Finding your table…</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.goldButtonText}>Take a Seat</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID="invite-dismiss-btn"
+                  style={styles.sheetDismiss}
+                  onPress={dismissInvite}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.sheetDismissText}>Not now</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -529,7 +776,7 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
   },
   heroMetaText: {
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 10,
     fontWeight: '600',
     letterSpacing: 2,
@@ -585,34 +832,97 @@ const styles = StyleSheet.create({
     height: 2,
     backgroundColor: 'rgba(212,175,55,0.55)',
   },
-  actionRowNarrow: {
-    flexDirection: 'column',
-  },
-  actionDividerNarrow: {
-    width: '100%',
-    height: 1,
-  },
   nameBlock: {
     padding: 18,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.07)',
   },
-  actionRow: {
+  nameRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
-  actionCreate: {
+  nameInput: {
     flex: 1,
-    padding: 14,
-    paddingBottom: 18,
   },
-  actionJoin: {
+  avatarChip: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: 'rgba(212,175,55,0.55)',
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarChipEmoji: {
+    fontSize: 24,
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    right: -3,
+    bottom: -3,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarEditBadgeText: {
+    color: '#000',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  avatarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  avatarOption: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarOptionSelected: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(212,175,55,0.15)',
+  },
+  avatarOptionEmoji: {
+    fontSize: 22,
+  },
+  actionsBlock: {
+    padding: 18,
+    paddingTop: 16,
+  },
+  orDividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  orDividerRule: {
     flex: 1,
-    padding: 14,
-    paddingBottom: 18,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  actionDivider: {
-    width: 1,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+  buttonLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  buttonBusy: {
+    opacity: 0.85,
   },
   inputGroup: {
     width: '100%',
@@ -638,18 +948,27 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   sectionLabel: {
-    color: 'rgba(255,255,255,0.35)',
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
-    marginBottom: 10,
   },
   codeInput: {
     textAlign: 'center',
     letterSpacing: 5,
     fontSize: 20,
     fontWeight: '800',
+    marginBottom: 10,
+  },
+  codeInputError: {
+    borderColor: 'rgba(239,68,68,0.6)',
+  },
+  joinErrorText: {
+    color: '#FFB4B4',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
     marginBottom: 10,
   },
   goldButton: {
@@ -675,11 +994,97 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
   },
+  outlineButtonDisabled: {
+    borderColor: 'rgba(212,175,55,0.35)',
+  },
   outlineButtonText: {
     color: COLORS.goldLight,
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 1,
+  },
+  outlineButtonTextDisabled: {
+    color: 'rgba(243,229,171,0.45)',
+  },
+  sheetScrim: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: COLORS.surfaceSolid,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(212,175,55,0.25)',
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 30,
+  },
+  sheetGrabber: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    marginBottom: 16,
+  },
+  sheetChecking: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    gap: 12,
+  },
+  sheetCheckingText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sheetKicker: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 3,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  sheetTitle: {
+    color: COLORS.text,
+    fontFamily: SERIF,
+    fontSize: 26,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  sheetCode: {
+    color: COLORS.goldLight,
+    letterSpacing: 3,
+  },
+  sheetSub: {
+    color: COLORS.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  sheetError: {
+    color: '#FFB4B4',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 18,
+  },
+  sheetJoinButton: {
+    marginTop: 14,
+  },
+  sheetDismiss: {
+    marginTop: 14,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  sheetDismissText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
   },
   howToPlayLink: {
     marginTop: 20,

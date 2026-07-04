@@ -38,6 +38,7 @@ import TrickCardEntry from '../components/TrickCardEntry';
 import ChatDrawer, { FeedItem } from '../components/ChatDrawer';
 import TurnClock, { DANGER_AT_SECONDS } from '../components/TurnClock';
 import GoldRain from '../components/GoldRain';
+import { EntranceView, WinnerAura } from '../components/WinnerCelebration';
 import SirenVignette from '../components/SirenVignette';
 import AnimatedScore from '../components/AnimatedScore';
 import BidTensionMeter from '../components/BidTensionMeter';
@@ -62,6 +63,7 @@ interface GameState {
   players: {
     id: string;
     name: string;
+    avatar?: string;
     is_host: boolean;
     bid: number | null;
     tricks_won: number;
@@ -136,6 +138,7 @@ export default function GameScreen() {
     player_name: string;
     player_id: string;
     host_token?: string;
+    avatar?: string;
   }>();
   const router = useRouter();
   const navigation = useNavigation();
@@ -348,6 +351,7 @@ export default function GameScreen() {
       params.player_id,
       params.host_token,
       resumeTokenRef.current || undefined,
+      params.avatar,
     );
 
     const socket = new WebSocket(url);
@@ -538,7 +542,7 @@ export default function GameScreen() {
         // ignore parse errors
       }
     };
-  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.host_token, resumeStorageKey, router, trickCollect, trickPop, playCardSound, playTrickSound, pushFeed]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.host_token, params.avatar, resumeStorageKey, router, trickCollect, trickPop, playCardSound, playTrickSound, pushFeed]);
 
   useEffect(() => {
     let active = true;
@@ -731,6 +735,10 @@ export default function GameScreen() {
       playTrumpSound();
       if (trumpRevealTimer.current) clearTimeout(trumpRevealTimer.current);
       trumpRevealTimer.current = setTimeout(() => setTrumpReveal(null), 1700);
+    }
+
+    if (next === 'game_over') {
+      void fireHaptic('success');
     }
   }, [gameState, bidLockAnim, fireHaptic, playTrumpSound]);
 
@@ -998,7 +1006,7 @@ export default function GameScreen() {
                 style={[styles.playerItem, !p.is_connected && styles.playerItemAway]}
               >
                 <View style={[styles.avatar, p.id === your_id && styles.avatarYou]}>
-                  <Text style={styles.avatarText}>{p.is_bot ? '♟' : p.name[0]?.toUpperCase()}</Text>
+                  <Text style={styles.avatarText}>{p.avatar || (p.is_bot ? '♟' : p.name[0]?.toUpperCase())}</Text>
                 </View>
                 <Text style={styles.playerName}>{p.name}</Text>
                 {!p.is_connected && (
@@ -1224,26 +1232,59 @@ export default function GameScreen() {
   // === GAME OVER ===
   if (phase === 'game_over') {
     const sorted = [...players].sort((a, b) => b.total_score - a.total_score);
+    // Choreography: title → runners-up rise one by one → winner lands
+    // last → crown drops → champion line. All delays from mount.
+    const runnerUpDelay = (i: number) => 140 + (i - 1) * 90;
+    const winnerDelay = 140 + Math.max(0, sorted.length - 1) * 90 + 160;
+    const crownAt = winnerDelay + 320;
     return (
       <SafeAreaView style={styles.container}>
+        <GoldRain reduceMotion={reduceMotion} />
         <ScrollView contentContainerStyle={styles.gameOverWrap}>
-          <Text style={styles.gameOverTitle}>Game Over!</Text>
+          <EntranceView reduceMotion={reduceMotion}>
+            <Text style={styles.gameOverTitle}>Game Over!</Text>
+          </EntranceView>
           {sorted[0] && (
-            <Text style={styles.championLabel}>👑 {sorted[0].name} runs the table</Text>
+            <EntranceView delay={crownAt + 300} distance={8} reduceMotion={reduceMotion}>
+              <Text style={styles.championLabel}>👑 {sorted[0].name} runs the table</Text>
+            </EntranceView>
           )}
 
           <View style={styles.podium}>
             {sorted.map((p, i) => (
-              <View key={p.id} style={styles.standingItem}>
-                <Text style={styles.standingRank}>#{i + 1}</Text>
-                <View style={[styles.avatar, i === 0 && styles.avatarWinner]}>
-                  <Text style={styles.avatarText}>{p.name[0]?.toUpperCase()}</Text>
+              <EntranceView
+                key={p.id}
+                delay={i === 0 ? winnerDelay : runnerUpDelay(i)}
+                reduceMotion={reduceMotion}
+              >
+                <View style={[styles.standingItem, i === 0 && styles.standingItemWinner]}>
+                  <Text style={styles.standingRank}>#{i + 1}</Text>
+                  {i === 0 ? (
+                    <WinnerAura
+                      size={48}
+                      crownDelay={crownAt}
+                      reduceMotion={reduceMotion}
+                      style={styles.winnerAura}
+                    >
+                      <View style={[styles.avatar, styles.avatarWinner, styles.avatarWinnerBig]}>
+                        <Text style={[styles.avatarText, styles.avatarTextBig]}>
+                          {p.avatar || p.name[0]?.toUpperCase()}
+                        </Text>
+                      </View>
+                    </WinnerAura>
+                  ) : (
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>{p.avatar || p.name[0]?.toUpperCase()}</Text>
+                    </View>
+                  )}
+                  <Text style={[styles.standingName, i === 0 && styles.standingNameWinner]}>
+                    {p.name}
+                  </Text>
+                  <Text style={[styles.standingScore, i === 0 && { color: COLORS.gold }]}>
+                    {p.total_score} pts
+                  </Text>
                 </View>
-                <Text style={styles.standingName}>{p.name}</Text>
-                <Text style={[styles.standingScore, i === 0 && { color: COLORS.gold }]}>
-                  {p.total_score} pts
-                </Text>
-              </View>
+              </EntranceView>
             ))}
           </View>
 
@@ -1283,9 +1324,8 @@ export default function GameScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
-          <GoldRain reduceMotion={reduceMotion} />
-          {leaveModal}
-        </SafeAreaView>
+        {leaveModal}
+      </SafeAreaView>
     );
   }
 
@@ -2976,6 +3016,28 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8,
     gap: 10,
+  },
+  standingItemWinner: {
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.45)',
+    backgroundColor: 'rgba(212,175,55,0.08)',
+    paddingVertical: 18,
+  },
+  winnerAura: {
+    marginRight: 12,
+  },
+  avatarWinnerBig: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 0,
+  },
+  avatarTextBig: {
+    fontSize: 22,
+  },
+  standingNameWinner: {
+    fontSize: 17,
+    fontWeight: '800',
   },
   standingRank: {
     color: COLORS.goldLight,
