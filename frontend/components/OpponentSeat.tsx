@@ -14,6 +14,7 @@ export interface SeatPlayer {
   total_score: number;
   card_count: number;
   is_connected: boolean;
+  streak?: number;
 }
 
 interface Props {
@@ -39,6 +40,9 @@ export default function OpponentSeat({ player, isTurn, isDealer, phase, style }:
           <Text style={styles.avatarText}>{player.name[0]?.toUpperCase()}</Text>
         </View>
         <Text style={styles.name} numberOfLines={1}>{player.name}</Text>
+        {(player.streak ?? 0) >= 2 && (
+          <Text style={styles.streakBadge}>🔥{player.streak}</Text>
+        )}
         {isDealer && <Text style={styles.dealerBadge}>D</Text>}
       </View>
       <View style={styles.bottomRow}>
@@ -119,6 +123,16 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
     backgroundColor: 'rgba(212,175,55,0.2)',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  streakBadge: {
+    color: '#FF9F43',
+    fontSize: 9,
+    fontWeight: '800',
+    backgroundColor: 'rgba(255,159,67,0.15)',
     paddingHorizontal: 4,
     paddingVertical: 1,
     borderRadius: 4,

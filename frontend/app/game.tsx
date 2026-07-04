@@ -11,6 +11,7 @@ import {
   Animated,
   Easing,
   AccessibilityInfo,
+  AppState,
   Platform,
   StatusBar,
 } from 'react-native';
@@ -20,7 +21,7 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { buildShareMessage } from '../utils/share';
-import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS } from '../utils/theme';
+import { COLORS, SUIT_SYMBOLS, SUIT_DISPLAY_COLORS, SERIF } from '../utils/theme';
 import { VARIATIONS } from '../utils/variations';
 import { bidStatus, BID_STATUS_COLORS, scoreColor } from '../utils/bidStatus';
 import PlayingCard from '../components/PlayingCard';
@@ -31,12 +32,31 @@ import OpponentSeat from '../components/OpponentSeat';
 import ReactionOverlay, { IncomingReaction } from '../components/ReactionOverlay';
 import ReactionTray from '../components/ReactionTray';
 import TrickCardEntry from '../components/TrickCardEntry';
+import ChatDrawer, { FeedItem } from '../components/ChatDrawer';
+import TurnClock, { DANGER_AT_SECONDS } from '../components/TurnClock';
+import GoldRain from '../components/GoldRain';
+import SirenVignette from '../components/SirenVignette';
+
+/** Alert.alert is a silent no-op on react-native-web — use window.confirm there. */
+function confirmDialog(title: string, message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    // eslint-disable-next-line no-alert
+    if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    }
+    return;
+  }
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Leave', style: 'destructive', onPress: onConfirm },
+  ]);
+}
 import { seatPositions, seatSize } from '../utils/tableLayout';
 import { useCardSound } from '../utils/useCardSound';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? '';
 
 interface GameState {
   type: string;
@@ -53,6 +73,7 @@ interface GameState {
     is_connected: boolean;
     has_bid: boolean;
     offline_for: number | null;
+    streak: number;
   }[];
   your_id: string;
   your_index: number;
@@ -73,7 +94,17 @@ interface GameState {
   variation_config: { cards_per_round?: number; total_rounds?: number };
   trump_caller_index: number;
   force_grace_seconds: number;
+  turn_expires_in: number | null;
+  turn_timer_seconds: number;
+  round_end_auto_seconds: number;
+  pace: string;
 }
+
+const PACE_OPTIONS = [
+  { key: 'chill', label: '🐢 Chill', desc: '30s per move' },
+  { key: 'standard', label: '⚡ Standard', desc: '15s per move' },
+  { key: 'blitz', label: '🔥 Blitz', desc: '7s — pure adrenaline' },
+] as const;
 
 export default function GameScreen() {
   const params = useLocalSearchParams<{
@@ -110,6 +141,34 @@ export default function GameScreen() {
   const playCardSound = useCardSound();
   const prevTrickLenRef = useRef(0);
 
+  // === Table Talk (chat + live event feed) ===
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const chatOpenRef = useRef(false);
+  const feedSeq = useRef(0);
+  const gameStateRef = useRef<GameState | null>(null);
+  const lastSentChatRef = useRef<{ text: string; at: number } | null>(null);
+
+  // === Authoritative turn countdown ===
+  const deadlineRef = useRef<number | null>(null);
+  const timerTotalRef = useRef(15);
+  const lastWarnAtRef = useRef(-1);
+
+  useEffect(() => {
+    chatOpenRef.current = chatOpen;
+    if (chatOpen) setUnread(0);
+  }, [chatOpen]);
+
+  const pushFeed = useCallback((item: Omit<FeedItem, 'key'>) => {
+    feedSeq.current += 1;
+    const entry: FeedItem = { ...item, key: `f${feedSeq.current}` };
+    setFeed((prev) => {
+      const next = [...prev, entry];
+      return next.length > 60 ? next.slice(next.length - 60) : next;
+    });
+  }, []);
+
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
       .then(setReduceMotion)
@@ -121,7 +180,8 @@ export default function GameScreen() {
   }, [reduceMotion]);
 
   useEffect(() => {
-    const t = setInterval(() => setNowTick((n) => n + 1), 1000);
+    // 500ms tick keeps the countdown + offline timers feeling live
+    const t = setInterval(() => setNowTick((n) => n + 1), 500);
     return () => clearInterval(t);
   }, []);
 
@@ -213,8 +273,21 @@ export default function GameScreen() {
     }
   };
 
+  const heartbeatTimer = useRef<any>(null);
+  const intentionalClose = useRef(false);
+
   const connect = useCallback(() => {
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) return;
+    if (intentionalClose.current) return;
+    if (
+      ws.current &&
+      (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
 
     const wsProtocol = BACKEND_URL.startsWith('https') ? 'wss' : 'ws';
     const wsHost = BACKEND_URL.replace(/^https?:\/\//, '');
@@ -227,11 +300,26 @@ export default function GameScreen() {
       setConnected(true);
       setError('');
       void fireHaptic('selection');
+      // Heartbeat keeps proxies from dropping the socket and tells the
+      // server the room is alive even when the game is idle.
+      if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
+      heartbeatTimer.current = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ action: 'ping' }));
+        }
+      }, 20000);
     };
 
     socket.onclose = () => {
       setConnected(false);
-      reconnectTimer.current = setTimeout(connect, 3000);
+      if (heartbeatTimer.current) {
+        clearInterval(heartbeatTimer.current);
+        heartbeatTimer.current = null;
+      }
+      // Don't resurrect the socket after the player deliberately left
+      if (!intentionalClose.current) {
+        reconnectTimer.current = setTimeout(connect, 3000);
+      }
     };
 
     socket.onerror = () => {
@@ -241,9 +329,51 @@ export default function GameScreen() {
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === 'pong') return;
         if (data.type === 'state') {
+          const prev = gameStateRef.current;
+          gameStateRef.current = data;
           setGameState(data);
           stateReceivedAt.current = Date.now();
+
+          // Arm the local mirror of the server's move countdown
+          if (typeof data.turn_expires_in === 'number') {
+            deadlineRef.current = Date.now() + data.turn_expires_in * 1000;
+            timerTotalRef.current = data.phase === 'round_end'
+              ? (data.round_end_auto_seconds ?? 25)
+              : (data.turn_timer_seconds ?? 15);
+          } else {
+            deadlineRef.current = null;
+          }
+
+          // Derive live feed events from state changes
+          if (prev) {
+            if (
+              data.phase === 'bidding' &&
+              (prev.phase === 'waiting' || prev.current_round !== data.current_round)
+            ) {
+              pushFeed({
+                kind: 'event',
+                text: `— Round ${data.current_round} · ${data.cards_this_round} cards each —`,
+              });
+            }
+            data.players.forEach((p: any, i: number) => {
+              const old = prev.players[i];
+              if (!old || old.id !== p.id) return;
+              if (
+                !old.has_bid && p.has_bid && p.bid !== null &&
+                prev.current_round === data.current_round
+              ) {
+                pushFeed({ kind: 'event', text: `${p.name} calls ${p.bid}` });
+              }
+              if ((p.streak ?? 0) >= 2 && (p.streak ?? 0) > (old.streak ?? 0)) {
+                pushFeed({
+                  kind: 'event',
+                  text: `🔥 ${p.name} is ON FIRE — ${p.streak} perfect rounds straight`,
+                });
+              }
+            });
+          }
           const trickLen = (data.current_trick || []).length;
           if (trickLen > prevTrickLenRef.current) {
             playCardSound();
@@ -255,6 +385,10 @@ export default function GameScreen() {
             if (prevTrickRef.current !== key) {
               prevTrickRef.current = key;
               setTrickResult(data.last_completed_trick);
+              pushFeed({
+                kind: 'event',
+                text: `${data.last_completed_trick.winner_name} takes the trick`,
+              });
               if (!reduceMotionRef.current) {
                 trickPop.setValue(0);
                 Animated.timing(trickPop, {
@@ -288,19 +422,81 @@ export default function GameScreen() {
             ];
             return next.length > 8 ? next.slice(next.length - 8) : next;
           });
+        } else if (data.type === 'chat') {
+          const mine = data.player_index === gameStateRef.current?.your_index;
+          // Skip the server echo of a message we already rendered locally
+          const sent = lastSentChatRef.current;
+          if (mine && sent && sent.text === data.text && Date.now() - sent.at < 6000) {
+            lastSentChatRef.current = null;
+          } else {
+            pushFeed({
+              kind: 'chat',
+              name: data.player_name,
+              text: data.text,
+              mine,
+            });
+            if (!mine && !chatOpenRef.current) {
+              setUnread((u) => Math.min(99, u + 1));
+              void fireHaptic('light');
+            }
+          }
+        } else if (data.type === 'timeout') {
+          pushFeed({
+            kind: 'timeout',
+            text: `⏱ ${data.player_name} ran out of time — auto-played`,
+          });
         }
       } catch {
         // ignore parse errors
       }
     };
-  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop, playCardSound]);
+  }, [fireHaptic, params.room_id, params.player_name, params.player_id, params.is_host, trickPop, playCardSound, pushFeed]);
 
   useEffect(() => {
+    intentionalClose.current = false;
     connect();
     return () => {
+      intentionalClose.current = true;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (trickResultTimer.current) clearTimeout(trickResultTimer.current);
+      if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
       ws.current?.close();
+    };
+  }, [connect]);
+
+  // Reconnect the instant the app returns to the foreground. Mobile
+  // browsers/OS suspend WebSockets (and throttle timers) while the app is
+  // backgrounded — e.g. when switching apps to share the room code — so we
+  // cannot rely on the 3s retry loop alone.
+  useEffect(() => {
+    const onForeground = () => {
+      if (!ws.current || ws.current.readyState === WebSocket.CLOSED || ws.current.readyState === WebSocket.CLOSING) {
+        connect();
+      }
+    };
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') onForeground();
+    });
+
+    let webCleanup: (() => void) | undefined;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const onVisibility = () => {
+        if (document.visibilityState === 'visible') onForeground();
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+      window.addEventListener('focus', onForeground);
+      window.addEventListener('online', onForeground);
+      webCleanup = () => {
+        document.removeEventListener('visibilitychange', onVisibility);
+        window.removeEventListener('focus', onForeground);
+        window.removeEventListener('online', onForeground);
+      };
+    }
+
+    return () => {
+      sub.remove();
+      webCleanup?.();
     };
   }, [connect]);
 
@@ -311,17 +507,11 @@ export default function GameScreen() {
   };
 
   const handleLeave = () => {
-    Alert.alert('Leave Game', 'Are you sure you want to leave?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Leave',
-        style: 'destructive',
-        onPress: () => {
-          ws.current?.close();
-          router.replace('/');
-        },
-      },
-    ]);
+    confirmDialog('Leave Game', 'Are you sure you want to leave?', () => {
+      intentionalClose.current = true;
+      ws.current?.close();
+      router.replace('/');
+    });
   };
 
   const sendAction = async (action: any, haptic: 'selection' | 'light' | 'medium' | 'success' = 'selection') => {
@@ -394,6 +584,22 @@ export default function GameScreen() {
     };
   }, []);
 
+  // Siren haptics: buzz once per second during the final 3 seconds of MY move
+  useEffect(() => {
+    const id = setInterval(() => {
+      const gs = gameStateRef.current;
+      if (!gs || deadlineRef.current === null) return;
+      if (gs.current_player_index !== gs.your_index) return;
+      if (!['bidding', 'playing', 'trump_selection', 'trump_selection_v3'].includes(gs.phase)) return;
+      const rem = Math.ceil((deadlineRef.current - Date.now()) / 1000);
+      if (rem > 0 && rem <= DANGER_AT_SECONDS && lastWarnAtRef.current !== rem) {
+        lastWarnAtRef.current = rem;
+        void fireHaptic('error');
+      }
+    }, 250);
+    return () => clearInterval(id);
+  }, [fireHaptic]);
+
   // Loading state
   if (!gameState) {
     return (
@@ -410,6 +616,9 @@ export default function GameScreen() {
 
   const { phase, players, your_id, your_index } = gameState;
   const isHost = players.find((p) => p.id === your_id)?.is_host || false;
+  const hostPlayer = players.find((p) => p.is_host);
+  // If the host is offline, any connected player may act for a stuck player
+  const canForce = isHost || !hostPlayer || !hostPlayer.is_connected;
   const myInfo = players[your_index] || players.find((p) => p.id === your_id);
   const currentPlayerName = players[gameState.current_player_index]?.name || '';
   const isMyTurn = gameState.current_player_index === your_index;
@@ -421,6 +630,18 @@ export default function GameScreen() {
     : 0;
   const forceRemaining = Math.max(0, Math.ceil((gameState.force_grace_seconds ?? 15) - offlineElapsed));
   void nowTick; // re-render driver for the countdown
+
+  // Server-authoritative move countdown, mirrored locally
+  const timerRemaining = deadlineRef.current !== null
+    ? Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000))
+    : null;
+  const timerTotal = timerTotalRef.current;
+  const sendChat = (text: string) => {
+    // Echo instantly so chat feels alive; the server broadcast is deduped
+    lastSentChatRef.current = { text, at: Date.now() };
+    pushFeed({ kind: 'chat', name: myInfo?.name || params.player_name, text, mine: true });
+    void sendAction({ action: 'chat', text }, 'light');
+  };
 
   // Playable cards logic
   const getPlayableIndices = (): Set<number> => {
@@ -470,12 +691,19 @@ export default function GameScreen() {
           <Text style={styles.backBtnText}>← Back</Text>
         </TouchableOpacity>
         <ScrollView contentContainerStyle={styles.lobbyWrap}>
-          <Text style={styles.lobbyTitle}>JUDGEMENT</Text>
+          <View style={styles.lobbyKickerRow}>
+            <View style={styles.lobbyKickerRule} />
+            <Text style={styles.lobbyKicker}>PRIVATE TABLE</Text>
+            <View style={styles.lobbyKickerRule} />
+          </View>
+          <Text style={styles.lobbyTitle}>Judgement</Text>
 
           <View style={styles.roomCodeBox}>
-            <Text style={styles.roomCodeLabel}>ROOM CODE</Text>
-            <Text style={styles.roomCode}>{gameState.room_id}</Text>
-            <Text style={styles.roomCodeHint}>Share this code with friends</Text>
+            <View style={styles.roomCodeInner}>
+              <Text style={styles.roomCodeLabel}>ROOM CODE</Text>
+              <Text style={styles.roomCode}>{gameState.room_id}</Text>
+              <Text style={styles.roomCodeHint}>Share this code with friends</Text>
+            </View>
             <View style={styles.roomCodeActions}>
               <TouchableOpacity
                 testID="copy-code-btn"
@@ -512,11 +740,20 @@ export default function GameScreen() {
 
           <View style={styles.playerList}>
             {players.map((p) => (
-              <View key={p.id} testID={`player-${p.id}`} style={styles.playerItem}>
+              <View
+                key={p.id}
+                testID={`player-${p.id}`}
+                style={[styles.playerItem, !p.is_connected && styles.playerItemAway]}
+              >
                 <View style={[styles.avatar, p.id === your_id && styles.avatarYou]}>
                   <Text style={styles.avatarText}>{p.name[0]?.toUpperCase()}</Text>
                 </View>
                 <Text style={styles.playerName}>{p.name}</Text>
+                {!p.is_connected && (
+                  <View style={[styles.badge, styles.badgeAway]}>
+                    <Text style={styles.badgeText}>AWAY</Text>
+                  </View>
+                )}
                 {p.is_host && (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>HOST</Text>
@@ -591,6 +828,41 @@ export default function GameScreen() {
             )}
           </View>
 
+          <View style={styles.variationSection}>
+            <Text style={styles.variationLabel}>TABLE PACE</Text>
+            <View style={styles.paceRow}>
+              {PACE_OPTIONS.map((opt) => {
+                const selected = (gameState.pace || 'standard') === opt.key;
+                if (!isHost) {
+                  return selected ? (
+                    <View key={opt.key} style={[styles.paceChip, styles.paceChipSelected]}>
+                      <Text style={styles.paceChipLabelSelected}>{opt.label}</Text>
+                      <Text style={styles.paceChipDesc}>{opt.desc}</Text>
+                    </View>
+                  ) : null;
+                }
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    testID={`pace-${opt.key}`}
+                    style={[styles.paceChip, selected && styles.paceChipSelected]}
+                    onPress={() => void sendAction({ action: 'set_pace', pace: opt.key }, 'selection')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={selected ? styles.paceChipLabelSelected : styles.paceChipLabel}>
+                      {opt.label}
+                    </Text>
+                    <Text style={styles.paceChipDesc}>{opt.desc}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.lobbyChatWrap}>
+            <ChatDrawer inline items={feed} onSend={sendChat} />
+          </View>
+
           {isHost && players.length >= 3 && (
             <TouchableOpacity
               testID="start-game-btn"
@@ -641,6 +913,9 @@ export default function GameScreen() {
       <SafeAreaView style={styles.container}>
         <ScrollView contentContainerStyle={styles.gameOverWrap}>
           <Text style={styles.gameOverTitle}>Game Over!</Text>
+          {sorted[0] && (
+            <Text style={styles.championLabel}>👑 {sorted[0].name} runs the table</Text>
+          )}
 
           <View style={styles.podium}>
             {sorted.map((p, i) => (
@@ -677,6 +952,7 @@ export default function GameScreen() {
               testID="home-btn"
               style={styles.outlineButton}
               onPress={() => {
+                intentionalClose.current = true;
                 ws.current?.close();
                 router.replace('/');
               }}
@@ -686,6 +962,7 @@ export default function GameScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+        <GoldRain reduceMotion={reduceMotion} />
       </SafeAreaView>
     );
   }
@@ -702,6 +979,12 @@ export default function GameScreen() {
             players={players}
             currentRound={gameState.current_round}
           />
+
+          {timerRemaining !== null && (
+            <Text style={styles.roundEndCountdown}>
+              Next round starts in {timerRemaining}s
+            </Text>
+          )}
 
           {isHost && (
             <TouchableOpacity
@@ -790,6 +1073,20 @@ export default function GameScreen() {
               <Text style={styles.helpBtnText}>?</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              testID="chat-toggle-btn"
+              onPress={() => setChatOpen(true)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={styles.helpBtn}
+            >
+              <Text style={styles.helpBtnText}>💬</Text>
+              {unread > 0 && (
+                <View style={styles.unreadBadge}>
+                  <Text style={styles.unreadBadgeText}>{unread}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
             <View
               testID="connection-dot"
               accessibilityLabel={connected ? 'Connected' : 'Reconnecting'}
@@ -842,7 +1139,7 @@ export default function GameScreen() {
                       <OfflineRecoveryBanner
                         name={currentPlayer.name}
                         remaining={forceRemaining}
-                        isHost={isHost}
+                        canForce={canForce}
                         onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
                       />
                     )}
@@ -922,12 +1219,27 @@ export default function GameScreen() {
                 </>
               );
             })()}
+
+            {(phase === 'bidding' || phase === 'playing') && timerRemaining !== null && (
+              <View style={styles.turnClockWrap} pointerEvents="none">
+                <TurnClock
+                  remaining={timerRemaining}
+                  total={timerTotal}
+                  playerName={currentPlayerName}
+                  myTurn={isMyTurn}
+                  reduceMotion={reduceMotion}
+                />
+              </View>
+            )}
           </View>
 
           <View style={styles.selfDock}>
             <View style={styles.selfMeta}>
               <View>
-                <Text style={styles.selfName}>{myInfo?.name || params.player_name}</Text>
+                <Text style={styles.selfName}>
+                  {myInfo?.name || params.player_name}
+                  {(myInfo?.streak ?? 0) >= 2 ? `  🔥${myInfo?.streak}` : ''}
+                </Text>
                 <Text
                   style={[
                     styles.selfSubtext,
@@ -974,6 +1286,7 @@ export default function GameScreen() {
             totalRounds={gameState.total_rounds}
             restrictedBids={gameState.restricted_bids || []}
             onPlaceBid={(bid) => void sendAction({ action: 'place_bid', bid }, 'medium')}
+            secondsLeft={timerRemaining}
           />
 
           {showTrumpSelection && !showBidLock && (
@@ -1025,7 +1338,7 @@ export default function GameScreen() {
                   <OfflineRecoveryBanner
                     name={currentPlayer.name}
                     remaining={forceRemaining}
-                    isHost={isHost}
+                    canForce={canForce}
                     onForce={() => void sendAction({ action: 'force_action' }, 'medium')}
                   />
                 ) : (
@@ -1036,6 +1349,17 @@ export default function GameScreen() {
                       {phase === 'trump_selection' ? 'call trump' : 'choose trump'}
                     </Text>
                   </>
+                )}
+                {timerRemaining !== null && (
+                  <View style={styles.trumpClockWrap}>
+                    <TurnClock
+                      remaining={timerRemaining}
+                      total={timerTotal}
+                      playerName={trumpCaller?.name || ''}
+                      myTurn={iAmTrumpCaller}
+                      reduceMotion={reduceMotion}
+                    />
+                  </View>
                 )}
               </View>
             </View>
@@ -1091,7 +1415,23 @@ export default function GameScreen() {
             reduceMotion={reduceMotion}
             onDone={removeReaction}
           />
+
         </View>
+
+        {isMyTurn &&
+          timerRemaining !== null &&
+          timerRemaining > 0 &&
+          timerRemaining <= DANGER_AT_SECONDS &&
+          (phase === 'bidding' || phase === 'playing') && (
+            <SirenVignette reduceMotion={reduceMotion} />
+        )}
+
+        <ChatDrawer
+          items={feed}
+          visible={chatOpen}
+          onClose={() => setChatOpen(false)}
+          onSend={sendChat}
+        />
       </View>
     </SafeAreaView>
   );
@@ -1164,12 +1504,12 @@ function StatusPill({
 function OfflineRecoveryBanner({
   name,
   remaining,
-  isHost,
+  canForce,
   onForce,
 }: {
   name: string;
   remaining: number;
-  isHost: boolean;
+  canForce: boolean;
   onForce: () => void;
 }) {
   return (
@@ -1179,7 +1519,7 @@ function OfflineRecoveryBanner({
         <Text style={styles.offlineBannerSub}>
           Giving them {remaining}s to reconnect…
         </Text>
-      ) : isHost ? (
+      ) : canForce ? (
         <TouchableOpacity
           testID="force-action-btn"
           style={styles.offlineForceBtn}
@@ -1233,22 +1573,57 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 16,
   },
+  lobbyKickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  lobbyKickerRule: {
+    width: 44,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(212,175,55,0.45)',
+  },
+  lobbyKicker: {
+    color: 'rgba(243,229,171,0.7)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 4,
+  },
   lobbyTitle: {
     color: COLORS.goldLight,
-    fontSize: 36,
-    fontWeight: '900',
-    letterSpacing: 5,
+    fontFamily: SERIF,
+    fontSize: 38,
+    fontWeight: '700',
+    letterSpacing: 2,
     marginBottom: 20,
+    textShadowColor: 'rgba(212,175,55,0.3)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 16,
   },
   roomCodeBox: {
     backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: COLORS.borderAccent,
-    borderRadius: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 28,
+    borderRadius: 18,
+    padding: 6,
     alignItems: 'center',
     marginBottom: 24,
+    alignSelf: 'stretch',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  roomCodeInner: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(212,175,55,0.4)',
+    borderRadius: 13,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
   },
   roomCodeLabel: {
     color: COLORS.textSecondary,
@@ -1271,7 +1646,8 @@ const styles = StyleSheet.create({
   roomCodeActions: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 12,
+    marginTop: 10,
+    marginBottom: 8,
   },
   roomCodeActionBtn: {
     flexDirection: 'row',
@@ -1348,6 +1724,12 @@ const styles = StyleSheet.create({
   },
   badgeYou: {
     backgroundColor: 'rgba(212,175,55,0.2)',
+  },
+  badgeAway: {
+    backgroundColor: 'rgba(239,68,68,0.18)',
+  },
+  playerItemAway: {
+    opacity: 0.55,
   },
   badgeText: {
     color: COLORS.goldLight,
@@ -1560,11 +1942,101 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  unreadBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    backgroundColor: COLORS.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  unreadBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  turnClockWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 6,
+  },
+  trumpClockWrap: {
+    marginTop: 14,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  lobbyChatWrap: {
+    width: '100%',
+    marginBottom: 20,
+  },
+  paceRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  paceChip: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
+    backgroundColor: COLORS.surfaceGlass,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  paceChipSelected: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(212,175,55,0.12)',
+  },
+  paceChipLabel: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  paceChipLabelSelected: {
+    color: COLORS.goldLight,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  paceChipDesc: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  roundEndCountdown: {
+    color: COLORS.goldLight,
+    fontFamily: SERIF,
+    fontStyle: 'italic',
+    fontSize: 15,
+    marginTop: 14,
+    textAlign: 'center',
+  },
+  championLabel: {
+    color: COLORS.goldLight,
+    fontFamily: SERIF,
+    fontStyle: 'italic',
+    fontSize: 17,
+    marginTop: -10,
+    marginBottom: 18,
+    textAlign: 'center',
+  },
   // Trick Area
   trickWinnerText: {
     color: COLORS.gold,
-    fontSize: 14,
+    fontFamily: SERIF,
+    fontSize: 15,
     fontWeight: '700',
+    fontStyle: 'italic',
     marginBottom: 8,
   },
   trickCards: {
@@ -1688,8 +2160,12 @@ const styles = StyleSheet.create({
   },
   roundEndTitle: {
     color: COLORS.goldLight,
-    fontSize: 26,
-    fontWeight: '800',
+    fontFamily: SERIF,
+    fontSize: 28,
+    fontWeight: '700',
+    textShadowColor: 'rgba(212,175,55,0.3)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 14,
     marginBottom: 20,
   },
 
@@ -1701,11 +2177,15 @@ const styles = StyleSheet.create({
   },
   gameOverTitle: {
     color: COLORS.goldLight,
-    fontSize: 32,
-    fontWeight: '900',
-    letterSpacing: 3,
+    fontFamily: SERIF,
+    fontSize: 34,
+    fontWeight: '700',
+    letterSpacing: 2,
     marginBottom: 20,
     marginTop: 20,
+    textShadowColor: 'rgba(212,175,55,0.35)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
   },
   podium: {
     width: '100%',
@@ -1894,10 +2374,14 @@ const styles = StyleSheet.create({
   },
   trumpTitle: {
     color: COLORS.goldLight,
-    fontSize: 22,
-    fontWeight: '900',
+    fontFamily: SERIF,
+    fontSize: 24,
+    fontWeight: '700',
     letterSpacing: 1,
     marginBottom: 4,
+    textShadowColor: 'rgba(212,175,55,0.3)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 14,
   },
   trumpSubtitle: {
     color: COLORS.textSecondary,
@@ -1973,8 +2457,9 @@ const styles = StyleSheet.create({
   },
   trumpRevealText: {
     color: COLORS.goldLight,
-    fontSize: 18,
-    fontWeight: '900',
+    fontFamily: SERIF,
+    fontSize: 20,
+    fontWeight: '700',
     letterSpacing: 1,
   },
 
@@ -1998,10 +2483,14 @@ const styles = StyleSheet.create({
   },
   bidLockTitle: {
     color: COLORS.goldLight,
-    fontSize: 24,
-    fontWeight: '900',
+    fontFamily: SERIF,
+    fontSize: 26,
+    fontWeight: '700',
     letterSpacing: 1,
     marginBottom: 8,
+    textShadowColor: 'rgba(212,175,55,0.3)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 14,
   },
   bidLockTotal: {
     color: COLORS.text,

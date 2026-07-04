@@ -14,16 +14,17 @@ import {
   Animated,
   Easing,
   AccessibilityInfo,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { COLORS, SUIT_SYMBOLS } from '../utils/theme';
+import { COLORS, SUIT_SYMBOLS, SERIF } from '../utils/theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parseRoomCodeParam } from '../utils/share';
 
 const STATUSBAR_HEIGHT = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0;
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL ?? '';
 const PLAYER_NAME_KEY = 'judgement_player_name';
 
 function generateId(): string {
@@ -38,6 +39,18 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const floatAnim = useRef(new Animated.Value(0)).current;
+  const entryAnim = useRef(new Animated.Value(0)).current;
+  const { width } = useWindowDimensions();
+  const isNarrow = width < 400;
+
+  useEffect(() => {
+    Animated.timing(entryAnim, {
+      toValue: 1,
+      duration: reduceMotion ? 0 : 700,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [entryAnim, reduceMotion]);
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
@@ -52,7 +65,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     AsyncStorage.getItem(PLAYER_NAME_KEY)
-      .then((saved) => {
+      .then((saved: string | null) => {
         if (saved) setPlayerName((current) => current || saved);
       })
       .catch(() => {
@@ -278,29 +291,53 @@ export default function HomeScreen() {
           <Animated.View
             style={[
               styles.heroPanel,
-              !reduceMotion && {
+              isNarrow && styles.heroPanelNarrow,
+              {
+                opacity: entryAnim,
                 transform: [
                   {
-                    translateY: floatAnim.interpolate({
+                    translateY: entryAnim.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [0, -3],
+                      outputRange: [14, 0],
                     }),
                   },
                 ],
               },
             ]}
           >
+            <View style={styles.kickerRow}>
+              <View style={styles.kickerRule} />
+              <Text style={styles.kicker}>THE HOUSE PRESENTS</Text>
+              <View style={styles.kickerRule} />
+            </View>
             <Text style={styles.title} adjustsFontSizeToFit numberOfLines={1}>Judgement</Text>
             <Text style={styles.subtitle}>Call it. Own it.</Text>
-            <View style={styles.heroChips}>
-              <View style={styles.heroChip}><Text style={styles.heroChipText}>Real-time</Text></View>
-              <View style={styles.heroChip}><Text style={styles.heroChipText}>3–7 players</Text></View>
+            <View style={styles.kickerRow}>
+              <View style={styles.kickerRule} />
+              <Text style={styles.heroMetaText}>REAL-TIME  ·  3–7 PLAYERS  ·  ONE TABLE</Text>
+              <View style={styles.kickerRule} />
             </View>
           </Animated.View>
         </View>
 
         {/* Unified form */}
-        <View style={styles.formPanel}>
+        <Animated.View
+          style={[
+            styles.formPanel,
+            {
+              opacity: entryAnim,
+              transform: [
+                {
+                  translateY: entryAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [22, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <View style={styles.formPanelAccent} />
           <View style={styles.nameBlock}>
             <Text style={styles.label}>Your Name</Text>
             <TextInput
@@ -315,7 +352,7 @@ export default function HomeScreen() {
             />
           </View>
 
-          <View style={styles.actionRow}>
+          <View style={[styles.actionRow, isNarrow && styles.actionRowNarrow]}>
             <View style={styles.actionCreate}>
               <Text style={styles.sectionLabel}>Create a room</Text>
               <TouchableOpacity
@@ -333,7 +370,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.actionDivider} />
+            <View style={[styles.actionDivider, isNarrow && styles.actionDividerNarrow]} />
 
             <View style={styles.actionJoin}>
               <Text style={styles.sectionLabel}>Have a code?</Text>
@@ -358,13 +395,13 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
         <TouchableOpacity
           style={styles.howToPlayLink}
           onPress={async () => {
             await fireHaptic('selection');
-            router.push('/how-to-play');
+            router.push('/how-to-play' as any);
           }}
           activeOpacity={0.7}
         >
@@ -399,8 +436,37 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 18,
     paddingHorizontal: 20,
-    paddingTop: 160,
-    paddingBottom: 20,
+    paddingTop: 150,
+    paddingBottom: 16,
+  },
+  heroPanelNarrow: {
+    paddingTop: 118,
+    paddingBottom: 10,
+  },
+  kickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  kickerRule: {
+    flex: 1,
+    maxWidth: 56,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(212,175,55,0.45)',
+  },
+  kicker: {
+    color: 'rgba(243,229,171,0.7)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 4,
+  },
+  heroMetaText: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 2,
   },
   suitScatter: {
     position: 'absolute',
@@ -414,48 +480,51 @@ const styles = StyleSheet.create({
   },
   title: {
     color: COLORS.goldLight,
-    fontSize: 46,
-    fontWeight: '900',
-    letterSpacing: 3,
-    marginBottom: 4,
+    fontFamily: SERIF,
+    fontSize: 52,
+    fontWeight: '700',
+    letterSpacing: 2,
+    marginBottom: 2,
     textAlign: 'center',
+    textShadowColor: 'rgba(212,175,55,0.35)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
   },
   subtitle: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 10,
-    letterSpacing: 0.3,
+    color: 'rgba(255,255,255,0.72)',
+    fontFamily: SERIF,
+    fontStyle: 'italic',
+    fontSize: 16,
+    lineHeight: 23,
+    marginTop: 6,
+    marginBottom: 14,
+    letterSpacing: 0.5,
     textAlign: 'center',
-  },
-  heroChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 14,
-    justifyContent: 'center',
-  },
-  heroChip: {
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  heroChipText: {
-    color: COLORS.text,
-    fontSize: 12,
-    fontWeight: '700',
   },
   formPanel: {
     width: '100%',
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(212,175,55,0.15)',
+    borderColor: 'rgba(212,175,55,0.18)',
     backgroundColor: COLORS.surfaceSolid,
     overflow: 'hidden',
     marginBottom: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  formPanelAccent: {
+    height: 2,
+    backgroundColor: 'rgba(212,175,55,0.55)',
+  },
+  actionRowNarrow: {
+    flexDirection: 'column',
+  },
+  actionDividerNarrow: {
+    width: '100%',
+    height: 1,
   },
   nameBlock: {
     padding: 18,

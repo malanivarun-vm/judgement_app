@@ -20,12 +20,14 @@ interface BiddingModalProps {
   restrictedBids: number[];
   onPlaceBid: (bid: number) => void;
   cardStyle?: CardStyle;
+  /** Seconds left on the server move timer; turns red ≤3s. */
+  secondsLeft?: number | null;
 }
 
 export default function BiddingModal({
   visible, yourHand, cardsThisRound, trumpSuit,
   currentRound, totalRounds, restrictedBids, onPlaceBid,
-  cardStyle = 'minimal',
+  cardStyle = 'minimal', secondsLeft = null,
 }: BiddingModalProps) {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [selectedBid, setSelectedBid]   = useState(0);
@@ -108,7 +110,16 @@ export default function BiddingModal({
           <View style={styles.divider} />
 
           {/* ── Context chips ────────────────────────────── */}
-          <Text style={styles.kicker}>Bidding Round</Text>
+          <View style={styles.kickerRow}>
+            <Text style={styles.kicker}>Bidding Round</Text>
+            {typeof secondsLeft === 'number' && (
+              <View style={[styles.timerChip, secondsLeft <= 3 && styles.timerChipDanger]}>
+                <Text style={[styles.timerChipText, secondsLeft <= 3 && styles.timerChipTextDanger]}>
+                  ⏱ {secondsLeft}s
+                </Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.title}>How many sets will you win?</Text>
           <View style={styles.chips}>
             <MetaChip label={`Round ${currentRound}/${totalRounds}`} />
@@ -224,9 +235,29 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginVertical: 16 },
 
   // Header
+  kickerRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginBottom: 4,
+  },
   kicker: {
     color: COLORS.gold, fontSize: 10, fontWeight: '800',
-    letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4,
+    letterSpacing: 2, textTransform: 'uppercase',
+  },
+  timerChip: {
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999,
+    backgroundColor: 'rgba(212,175,55,0.12)',
+    borderWidth: 1, borderColor: 'rgba(212,175,55,0.35)',
+  },
+  timerChipDanger: {
+    backgroundColor: 'rgba(239,68,68,0.18)',
+    borderColor: COLORS.danger,
+  },
+  timerChipText: {
+    color: COLORS.goldLight, fontSize: 12, fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+  },
+  timerChipTextDanger: {
+    color: '#FF6B6B',
   },
   title: {
     color: COLORS.goldLight, fontSize: 19, fontWeight: '900',
