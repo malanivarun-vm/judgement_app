@@ -25,9 +25,9 @@ export interface FeedItem {
 }
 
 const QUICK_PHRASES = [
-  'Sus bid 👀',
+  'Sus prediction 👀',
   'Trust me 🤝',
-  'Who took my trick?!',
+  'Who took my round?!',
   'Easy money 💰',
   'That was personal 😤',
   'Run it back 🔁',

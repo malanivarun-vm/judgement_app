@@ -50,7 +50,7 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="game" />
+        <Stack.Screen name="game" options={{ gestureEnabled: false }} />
         <Stack.Screen name="how-to-play" />
         <Stack.Screen name="game-modes" />
         <Stack.Screen name="game-modes/[modeKey]" />

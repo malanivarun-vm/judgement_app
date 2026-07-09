@@ -162,6 +162,8 @@ export default function GameScreen() {
   const trumpRevealTimer = useRef<any>(null);
   const ambientPulse = useRef(new Animated.Value(0)).current;
   const turnPulse = useRef(new Animated.Value(0)).current;
+  const selfPulse = useRef(new Animated.Value(1)).current;
+  const wasMyTurnRef = useRef(false);
   const trickPop = useRef(new Animated.Value(0)).current;
   const trickCollect = useRef(new Animated.Value(0)).current;
   const reduceMotionRef = useRef(false);
@@ -431,7 +433,7 @@ export default function GameScreen() {
                 !old.has_bid && p.has_bid && p.bid !== null &&
                 prev.current_round === data.current_round
               ) {
-                pushFeed({ kind: 'event', text: `${p.name} calls ${p.bid}` });
+                pushFeed({ kind: 'event', text: `${p.name} predicts ${p.bid}` });
               }
               if ((p.streak ?? 0) >= 2 && (p.streak ?? 0) > (old.streak ?? 0)) {
                 pushFeed({
@@ -454,7 +456,7 @@ export default function GameScreen() {
               setTrickResult(data.last_completed_trick);
               pushFeed({
                 kind: 'event',
-                text: `${data.last_completed_trick.winner_name} takes the trick`,
+                text: `${data.last_completed_trick.winner_name} takes the round`,
               });
               if (!reduceMotionRef.current) {
                 trickPop.setValue(0);
@@ -699,6 +701,33 @@ export default function GameScreen() {
       }).start();
     }
   }, [gameState, reduceMotion, turnPulse]);
+
+  // Rising-edge "your turn started" signal: haptic buzz + one-shot pulse on the self box
+  useEffect(() => {
+    if (!gameState) return;
+    const myTurnNow = gameState.current_player_index === gameState.your_index;
+    if (myTurnNow && !wasMyTurnRef.current) {
+      void fireHaptic('medium');
+      if (!reduceMotion) {
+        selfPulse.setValue(1);
+        Animated.sequence([
+          Animated.timing(selfPulse, {
+            toValue: 1.03,
+            duration: 140,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.spring(selfPulse, {
+            toValue: 1,
+            speed: 14,
+            bounciness: 6,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }
+    }
+    wasMyTurnRef.current = myTurnNow;
+  }, [gameState, reduceMotion, selfPulse, fireHaptic]);
 
   // Phase transition effects: bid lock confirmation + trump reveal flash
   useEffect(() => {
@@ -1338,7 +1367,6 @@ export default function GameScreen() {
   const trumpSymbol = gameState.trump_suit ? SUIT_SYMBOLS[gameState.trump_suit] || '' : '—';
   const showBiddingModal = phase === 'bidding' && isMyTurn;
   const totalBids = players.filter((p) => p.has_bid).reduce((sum, p) => sum + (p.bid ?? 0), 0);
-  const activeModeName = VARIATIONS.find((item) => item.key === gameState.variation)?.name || 'Classic';
   const showTrumpSelection = phase === 'trump_selection' || phase === 'trump_selection_v3';
   const trumpCaller = players[gameState.trump_caller_index];
   const iAmTrumpCaller = gameState.trump_caller_index === your_index;
@@ -1401,8 +1429,13 @@ export default function GameScreen() {
 
         <View style={styles.tableShell}>
           <View style={styles.statusRail}>
-            <TouchableOpacity testID="leave-game-btn" onPress={handleLeave} style={styles.leaveButton}>
-              <Text style={styles.leaveBtnText}>← Leave</Text>
+            <TouchableOpacity
+              testID="leave-game-btn"
+              onPress={handleLeave}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              style={styles.helpBtn}
+            >
+              <Text style={styles.helpBtnText}>←</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1445,18 +1478,20 @@ export default function GameScreen() {
                 primary
               />
               <StatusPill
-                label="Round"
+                label="Game"
                 value={`${gameState.current_round}/${gameState.total_rounds}`}
                 primary
               />
-              <StatusPill label="Tricks" value={`${gameState.tricks_played}/${gameState.cards_this_round}`} />
-              <StatusPill label="Bids" value={`${totalBids}/${gameState.cards_this_round}`} />
-              <StatusPill label="Mode" value={activeModeName} />
               {gameState.waiting_count > 0 && (
                 <StatusPill label="Lobby" value={`${gameState.waiting_count} waiting`} />
               )}
             </View>
-            <BidTensionMeter total={totalBids} available={gameState.cards_this_round} />
+            <BidTensionMeter
+              total={totalBids}
+              available={gameState.cards_this_round}
+              roundsPlayed={gameState.tricks_played}
+              roundsTotal={gameState.cards_this_round}
+            />
           </View>
 
           <View
@@ -1510,7 +1545,7 @@ export default function GameScreen() {
                           },
                         ]}
                       >
-                        <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the trick</Text>
+                        <Text style={styles.trickWinnerText}>{trickResult.winner_name} took the round</Text>
                       </Animated.View>
                     )}
 
@@ -1571,8 +1606,8 @@ export default function GameScreen() {
                       <Text style={styles.tableCenterLabel}>
                         {phase === 'bidding'
                           ? isMyTurn
-                            ? 'Your turn to bid'
-                            : `Waiting for ${currentPlayerName} to bid`
+                            ? 'Your turn — predict'
+                            : `Waiting for ${currentPlayerName} to predict`
                           : isMyTurn
                             ? 'Your turn — play a card'
                             : `Waiting for ${currentPlayerName} to ${gameState.current_trick.length === 0 ? 'lead' : 'play'}`}
@@ -1647,22 +1682,24 @@ export default function GameScreen() {
                 </>
               );
             })()}
+          </View>
 
+          <View style={styles.turnClockSlot} pointerEvents="none">
             {(phase === 'bidding' || phase === 'playing') && timerRemaining !== null && (
-              <View style={styles.turnClockWrap} pointerEvents="none">
-                <TurnClock
-                  remaining={timerRemaining}
-                  total={timerTotal}
-                  playerName={currentPlayerName}
-                  myTurn={isMyTurn}
-                  reduceMotion={reduceMotion}
-                />
-              </View>
+              <TurnClock
+                remaining={timerRemaining}
+                total={timerTotal}
+                playerName={currentPlayerName}
+                myTurn={isMyTurn}
+                reduceMotion={reduceMotion}
+              />
             )}
           </View>
 
-          <View style={styles.selfDock}>
-            <View style={styles.selfMeta}>
+          <Animated.View
+            style={[styles.selfDock, { transform: [{ scale: selfPulse }] }]}
+          >
+            <View style={[styles.selfMeta, isMyTurn && styles.selfMetaActive]}>
               <View>
                 <Text style={styles.selfName}>
                   {myInfo?.name || params.player_name}
@@ -1681,8 +1718,8 @@ export default function GameScreen() {
                 >
                   {gameState.dealer_index === your_index ? 'Dealer' : ''}
                   {myInfo?.bid !== null && myInfo?.bid !== undefined
-                    ? `${gameState.dealer_index === your_index ? ' • ' : ''}Bid ${myInfo.bid} / Won ${myInfo.tricks_won}`
-                    : `${gameState.dealer_index === your_index ? ' • ' : ''}No bid yet`}
+                    ? `${gameState.dealer_index === your_index ? ' • ' : ''}Predicted ${myInfo.bid} / Won ${myInfo.tricks_won}`
+                    : `${gameState.dealer_index === your_index ? ' • ' : ''}No prediction yet`}
                 </Text>
               </View>
               <ReactionTray onSend={(id) => void sendAction({ action: 'reaction', reaction_id: id }, 'light')} />
@@ -1692,7 +1729,7 @@ export default function GameScreen() {
                 style={[styles.selfScore, { color: scoreColor(myInfo?.total_score || 0) }]}
               />
             </View>
-          </View>
+          </Animated.View>
 
           <View style={styles.handDock}>
             <HandDisplay
@@ -1704,6 +1741,7 @@ export default function GameScreen() {
               }
               onPlayCard={(card) => void sendAction({ action: 'play_card', card }, 'medium')}
               phase={phase}
+              labelActive={isMyTurn}
             />
           </View>
 
@@ -1735,7 +1773,7 @@ export default function GameScreen() {
                 {iAmTrumpCaller ? (
                   <>
                     <Text style={styles.trumpTitle}>
-                      {phase === 'trump_selection' ? 'Call Trump' : 'You won the bid'}
+                      {phase === 'trump_selection' ? 'Call Trump' : 'You won the prediction'}
                     </Text>
                     <Text style={styles.trumpSubtitle}>
                       {phase === 'trump_selection'
@@ -1843,17 +1881,17 @@ export default function GameScreen() {
                 >
                   LOCKED
                 </Animated.Text>
-                <Text style={styles.bidLockTitle}>All bids locked!</Text>
+                <Text style={styles.bidLockTitle}>All predictions locked!</Text>
                 <Text style={styles.bidLockTotal}>
-                  Total bids: {totalBids} / {gameState.cards_this_round} sets
+                  Total predictions: {totalBids} / {gameState.cards_this_round} wins
                 </Text>
-                <Text style={[styles.bidLockVerdict, { color: isTightGame ? COLORS.danger : COLORS.success }]}>
-                  {isTightGame ? 'Tight game' : 'Loose game'}
+                <Text style={[styles.bidLockVerdict, { color: isTightGame ? COLORS.danger : COLORS.info }]}>
+                  {isTightGame ? 'Tight table' : 'Loose table'}
                 </Text>
                 <Text style={styles.bidLockExplain}>
                   {isTightGame
-                    ? 'More bids than sets available — Someone will fall short. Make sure it is not you!'
-                    : 'Fewer bids than sets — Play smart and make others win the extra sets.'}
+                    ? 'More predictions than wins available — someone will fall short. Make sure it is not you!'
+                    : 'Fewer predictions than wins — play smart and make others win the extra rounds.'}
                 </Text>
               </View>
             </Animated.View>
@@ -2443,14 +2481,6 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 8,
   },
-  leaveButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: COLORS.borderGlass,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
   statusCluster: {
     flex: 1,
     flexDirection: 'row',
@@ -2665,11 +2695,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(212,175,55,0.28)',
     marginBottom: 10,
   },
-  leaveBtnText: {
-    color: COLORS.textSecondary,
-    fontSize: 18,
-    fontWeight: '600',
-  },
   helpBtn: {
     width: 32,
     height: 32,
@@ -2702,13 +2727,10 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '900',
   },
-  turnClockWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+  turnClockSlot: {
+    height: 36,
     alignItems: 'center',
-    zIndex: 6,
+    justifyContent: 'center',
   },
   trumpClockWrap: {
     marginTop: 14,
@@ -2853,6 +2875,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
+  },
+  selfMetaActive: {
+    borderColor: COLORS.gold,
+    borderWidth: 2,
+    backgroundColor: 'rgba(243,229,171,0.1)',
+    shadowColor: COLORS.gold,
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    elevation: 8,
   },
   selfName: {
     color: COLORS.text,

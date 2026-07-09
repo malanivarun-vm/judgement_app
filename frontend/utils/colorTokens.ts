@@ -13,6 +13,7 @@ export const CORE_COLORS = {
   goldLight: '#F3E5AB',
   danger: '#EF4444',
   success: '#10B981',
+  info: '#38BDF8',
   suitRed: '#E63946',
   suitBlack: '#1A1A1A',
   borderGlass: 'rgba(255, 255, 255, 0.1)',

@@ -162,7 +162,7 @@ export default function BiddingModal({
 
           {/* ── Context chips ────────────────────────────── */}
           <View style={styles.kickerRow}>
-            <Text style={styles.kicker}>Bidding Round</Text>
+            <Text style={styles.kicker}>Make Your Prediction</Text>
             {typeof secondsLeft === 'number' && (
               <View style={[styles.timerChip, secondsLeft <= 3 && styles.timerChipDanger]}>
                 <Text style={[styles.timerChipText, secondsLeft <= 3 && styles.timerChipTextDanger]}>
@@ -171,9 +171,9 @@ export default function BiddingModal({
               </View>
             )}
           </View>
-          <Text style={styles.title}>How many sets will you win?</Text>
+          <Text style={styles.title}>How many rounds will you win?</Text>
           <View style={styles.chips}>
-            <MetaChip label={`Round ${currentRound}/${totalRounds}`} />
+            <MetaChip label={`Game ${currentRound}/${totalRounds}`} />
             <MetaChip label={`${cardsThisRound} cards`} />
             <MetaChip
               label={trumpSuit ? `Trump ${trumpSymbol} ${trumpSuit}` : 'Trump chosen after bids'}
@@ -259,7 +259,7 @@ export default function BiddingModal({
               activeOpacity={0.88}
             >
             <Text style={styles.confirmTxt}>
-              {submitting ? 'Locking bid…' : `Lock in ${selectedBid} →`}
+              {submitting ? 'Locking prediction…' : `Lock in ${selectedBid} →`}
             </Text>
           </TouchableOpacity>
 

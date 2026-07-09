@@ -36,7 +36,7 @@ export default function ScoreBoard({ roundHistory, players, currentRound }: Scor
       <View style={styles.header}>
         <View>
           <Text style={styles.kicker}>
-            {currentRound ? `Round ${currentRound} recap` : `Round ${lastRound.round} recap`}
+            {currentRound ? `Game ${currentRound} recap` : `Game ${lastRound.round} recap`}
           </Text>
           <Text style={styles.title}>Scoreboard</Text>
         </View>
@@ -48,13 +48,13 @@ export default function ScoreBoard({ roundHistory, players, currentRound }: Scor
 
       <View style={styles.summaryRow}>
         <SummaryChip label="Leader" value={`${leader?.name || '—'} ${leader ? `• ${leader.total_score}` : ''}`} />
-        <SummaryChip label="Perfect bids" value={String(countPerfectBids(lastRound, players))} />
+        <SummaryChip label="Perfect predictions" value={String(countPerfectBids(lastRound, players))} />
       </View>
 
       <View style={styles.table}>
         <View style={styles.headerRow}>
           <Text style={[styles.headerCell, styles.nameCol]}>Player</Text>
-          <Text style={styles.headerCell}>Bid</Text>
+          <Text style={styles.headerCell} numberOfLines={1} adjustsFontSizeToFit>Predict</Text>
           <Text style={styles.headerCell}>Won</Text>
           <Text style={styles.headerCell}>Pts</Text>
           <Text style={[styles.headerCell, styles.totalCol]}>Total</Text>

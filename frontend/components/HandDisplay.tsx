@@ -23,6 +23,8 @@ interface HandDisplayProps {
   phase?: string;
   cardStyle?: CardStyle;
   showLabel?: boolean;
+  /** Tints the label gold when it's the local player's turn. */
+  labelActive?: boolean;
 }
 
 const GAP = 6;
@@ -209,6 +211,7 @@ export default function HandDisplay({
   phase,
   cardStyle = 'minimal',
   showLabel = true,
+  labelActive = false,
 }: HandDisplayProps) {
   const { width } = useWindowDimensions();
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -222,7 +225,7 @@ export default function HandDisplay({
   return (
     <View style={styles.container}>
       {showLabel && (
-        <Text style={styles.label}>
+        <Text style={[styles.label, labelActive && styles.labelActive]}>
           Your hand · {hand.length} card{hand.length !== 1 ? 's' : ''}
         </Text>
       )}
@@ -278,6 +281,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 8,
     paddingLeft: 2,
+  },
+  labelActive: {
+    color: COLORS.goldLight,
   },
   scroll: {
     maxHeight: 210,

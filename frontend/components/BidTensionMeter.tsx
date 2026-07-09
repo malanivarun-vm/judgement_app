@@ -5,14 +5,18 @@ import { COLORS } from '../utils/theme';
 export default function BidTensionMeter({
   total,
   available,
+  roundsPlayed,
+  roundsTotal,
 }: {
   total: number;
   available: number;
+  roundsPlayed: number;
+  roundsTotal: number;
 }) {
   const ratio = available > 0 ? total / available : 0;
   const fill = useRef(new Animated.Value(0)).current;
   const tight = total > available;
-  const exact = total === available;
+  const diff = Math.abs(available - total);
 
   useEffect(() => {
     Animated.spring(fill, {
@@ -23,14 +27,17 @@ export default function BidTensionMeter({
     }).start();
   }, [fill, ratio]);
 
-  const verdict = exact ? 'PERFECTLY TIGHT' : tight ? 'OVERBOOKED' : 'ROOM TO MANOEUVRE';
-  const color = exact || tight ? COLORS.danger : COLORS.success;
+  const verdict = tight ? `TIGHT BY ${diff}` : `LOOSE BY ${diff}`;
+  const color = tight ? COLORS.danger : COLORS.info;
+  const chipTextColor = tight ? '#FFFFFF' : '#06110b';
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.labelRow}>
+      <View style={styles.row}>
         <Text style={styles.label}>TABLE TENSION</Text>
-        <Text style={[styles.value, { color }]}>{total}/{available} · {verdict}</Text>
+        <View style={[styles.chip, { backgroundColor: color }]}>
+          <Text style={[styles.chipText, { color: chipTextColor }]}>{verdict}</Text>
+        </View>
       </View>
       <View style={styles.track}>
         <Animated.View
@@ -38,6 +45,7 @@ export default function BidTensionMeter({
             styles.fill,
             {
               backgroundColor: color,
+              shadowColor: color,
               width: fill.interpolate({
                 inputRange: [0, 1],
                 outputRange: ['0%', '100%'],
@@ -45,7 +53,15 @@ export default function BidTensionMeter({
             },
           ]}
         />
-        <View style={styles.dangerLine} />
+        <View style={styles.capLine} />
+      </View>
+      <View style={styles.row}>
+        <Text style={styles.footText}>
+          <Text style={styles.footBold}>{total} of {available}</Text> wins claimed
+        </Text>
+        <Text style={styles.footText}>
+          ROUNDS <Text style={styles.footBold}>{roundsPlayed}/{roundsTotal}</Text>
+        </Text>
       </View>
     </View>
   );
@@ -54,27 +70,36 @@ export default function BidTensionMeter({
 const styles = StyleSheet.create({
   wrap: {
     width: '100%',
-    gap: 5,
-    paddingHorizontal: 2,
+    gap: 7,
+    padding: 10,
+    borderRadius: 14,
+    backgroundColor: COLORS.surfaceGlass,
+    borderWidth: 1,
+    borderColor: COLORS.borderGlass,
   },
-  labelRow: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   label: {
     color: COLORS.textSecondary,
-    fontSize: 8,
+    fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 1.4,
+    letterSpacing: 1.6,
   },
-  value: {
-    fontSize: 9,
+  chip: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 9,
+  },
+  chipText: {
+    fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
   },
   track: {
-    height: 5,
+    height: 9,
     overflow: 'hidden',
     borderRadius: 99,
     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -82,16 +107,23 @@ const styles = StyleSheet.create({
   fill: {
     height: '100%',
     borderRadius: 99,
-    shadowColor: '#FFFFFF',
-    shadowOpacity: 0.45,
-    shadowRadius: 6,
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
   },
-  dangerLine: {
+  capLine: {
     position: 'absolute',
     right: 0,
-    width: 2,
+    width: 2.5,
     height: '100%',
     backgroundColor: COLORS.goldLight,
   },
+  footText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  footBold: {
+    color: COLORS.text,
+    fontWeight: '800',
+  },
 });
-
