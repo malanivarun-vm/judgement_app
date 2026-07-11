@@ -19,6 +19,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SUIT_SYMBOLS, SERIF } from '../utils/theme';
+import { TITLE_NAMES, titleFontSize } from '../utils/titleFont';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parseRoomCodeParam } from '../utils/share';
 import { requireBackendUrl } from '../utils/backend';
@@ -29,6 +30,85 @@ const PLAYER_NAME_KEY = 'judgement_player_name';
 
 function generateId(): string {
   return 'p_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+}
+
+const TITLE_DWELL_MS = 2500;
+const TITLE_ROLL_MS = 350;
+
+function RollingTitle({ reduceMotion }: { reduceMotion: boolean }) {
+  const { width } = useWindowDimensions();
+  const fontSize = titleFontSize(width);
+  const lineHeight = Math.ceil(fontSize * 1.3);
+  const [index, setIndex] = useState(0);
+  const roll = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setInterval(() => {
+      if (reduceMotion) {
+        setIndex((i) => (i + 1) % TITLE_NAMES.length);
+        return;
+      }
+      Animated.timing(roll, {
+        toValue: 1,
+        duration: TITLE_ROLL_MS,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished || cancelled) return;
+        roll.setValue(0);
+        setIndex((i) => (i + 1) % TITLE_NAMES.length);
+      });
+    }, TITLE_DWELL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      roll.stopAnimation();
+      roll.setValue(0);
+    };
+  }, [reduceMotion, roll]);
+
+  const current = TITLE_NAMES[index];
+  const next = TITLE_NAMES[(index + 1) % TITLE_NAMES.length];
+  const sizing = { fontSize, lineHeight };
+
+  return (
+    <View
+      style={[styles.titleRoller, { height: lineHeight }]}
+      accessible
+      accessibilityRole="header"
+      accessibilityLabel="Judgement, also known as Kachuful and Oh Hell!"
+    >
+      <Animated.Text
+        style={[
+          styles.title,
+          styles.titleRolling,
+          sizing,
+          { transform: [{ translateY: roll.interpolate({ inputRange: [0, 1], outputRange: [0, -lineHeight] }) }] },
+        ]}
+        adjustsFontSizeToFit
+        numberOfLines={1}
+        importantForAccessibility="no-hide-descendants"
+      >
+        {current}
+      </Animated.Text>
+      {!reduceMotion && (
+        <Animated.Text
+          style={[
+            styles.title,
+            styles.titleRolling,
+            sizing,
+            { transform: [{ translateY: roll.interpolate({ inputRange: [0, 1], outputRange: [lineHeight, 0] }) }] },
+          ]}
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          importantForAccessibility="no-hide-descendants"
+        >
+          {next}
+        </Animated.Text>
+      )}
+    </View>
+  );
 }
 
 export default function HomeScreen() {
@@ -338,7 +418,7 @@ export default function HomeScreen() {
               <Text style={styles.kicker}>THE HOUSE PRESENTS</Text>
               <View style={styles.kickerRule} />
             </View>
-            <Text style={styles.title} adjustsFontSizeToFit numberOfLines={1}>Judgement</Text>
+            <RollingTitle reduceMotion={reduceMotion} />
             <Text style={styles.subtitle}>Call it. Own it.</Text>
             <View style={styles.kickerRow}>
               <View style={styles.kickerRule} />
@@ -547,14 +627,23 @@ const styles = StyleSheet.create({
   title: {
     color: COLORS.goldLight,
     fontFamily: SERIF,
-    fontSize: 52,
     fontWeight: '700',
     letterSpacing: 2,
-    marginBottom: 2,
     textAlign: 'center',
     textShadowColor: 'rgba(212,175,55,0.35)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 18,
+  },
+  titleRoller: {
+    width: '100%',
+    overflow: 'hidden',
+    marginBottom: 2,
+  },
+  titleRolling: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    marginBottom: 0,
   },
   subtitle: {
     color: 'rgba(255,255,255,0.72)',
