@@ -38,9 +38,8 @@ const TITLE_ROLL_MS = 350;
 function RollingTitle({ reduceMotion }: { reduceMotion: boolean }) {
   const { width } = useWindowDimensions();
   const fontSize = titleFontSize(width);
-  const lineHeight = Math.ceil(fontSize * 1.3);
   const [index, setIndex] = useState(0);
-  const roll = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -49,65 +48,40 @@ function RollingTitle({ reduceMotion }: { reduceMotion: boolean }) {
         setIndex((i) => (i + 1) % TITLE_NAMES.length);
         return;
       }
-      Animated.timing(roll, {
-        toValue: 1,
-        duration: TITLE_ROLL_MS,
-        easing: Easing.inOut(Easing.cubic),
+      Animated.timing(opacity, {
+        toValue: 0,
+        duration: TITLE_ROLL_MS / 2,
+        easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }).start(({ finished }) => {
         if (!finished || cancelled) return;
-        roll.setValue(0);
         setIndex((i) => (i + 1) % TITLE_NAMES.length);
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: TITLE_ROLL_MS / 2,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
       });
     }, TITLE_DWELL_MS);
     return () => {
       cancelled = true;
       clearInterval(timer);
-      roll.stopAnimation();
-      roll.setValue(0);
+      opacity.stopAnimation();
+      opacity.setValue(1);
     };
-  }, [reduceMotion, roll]);
-
-  const current = TITLE_NAMES[index];
-  const next = TITLE_NAMES[(index + 1) % TITLE_NAMES.length];
-  const sizing = { fontSize, lineHeight };
+  }, [reduceMotion, opacity]);
 
   return (
-    <View
-      style={[styles.titleRoller, { height: lineHeight }]}
-      accessible
+    <Animated.Text
+      style={[styles.title, { fontSize, opacity }]}
+      adjustsFontSizeToFit
+      numberOfLines={1}
       accessibilityRole="header"
       accessibilityLabel="Judgement, also known as Kachuful and Oh Hell!"
     >
-      <Animated.Text
-        style={[
-          styles.title,
-          styles.titleRolling,
-          sizing,
-          { transform: [{ translateY: roll.interpolate({ inputRange: [0, 1], outputRange: [0, -lineHeight] }) }] },
-        ]}
-        adjustsFontSizeToFit
-        numberOfLines={1}
-        importantForAccessibility="no-hide-descendants"
-      >
-        {current}
-      </Animated.Text>
-      {!reduceMotion && (
-        <Animated.Text
-          style={[
-            styles.title,
-            styles.titleRolling,
-            sizing,
-            { transform: [{ translateY: roll.interpolate({ inputRange: [0, 1], outputRange: [lineHeight, 0] }) }] },
-          ]}
-          adjustsFontSizeToFit
-          numberOfLines={1}
-          importantForAccessibility="no-hide-descendants"
-        >
-          {next}
-        </Animated.Text>
-      )}
-    </View>
+      {TITLE_NAMES[index]}
+    </Animated.Text>
   );
 }
 
@@ -629,21 +603,11 @@ const styles = StyleSheet.create({
     fontFamily: SERIF,
     fontWeight: '700',
     letterSpacing: 2,
+    marginBottom: 2,
     textAlign: 'center',
     textShadowColor: 'rgba(212,175,55,0.35)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 18,
-  },
-  titleRoller: {
-    width: '100%',
-    overflow: 'hidden',
-    marginBottom: 2,
-  },
-  titleRolling: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    marginBottom: 0,
   },
   subtitle: {
     color: 'rgba(255,255,255,0.72)',
